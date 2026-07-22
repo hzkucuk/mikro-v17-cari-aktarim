@@ -52,6 +52,10 @@ python tools\make_icon.py
    yeniden adlandırır, işaretsiz seçenek eski kartı koruyup yeni kart oluşturur.
 5. Aktarımı onaylayın ve işlem günlüğünü kontrol edin.
 
+Birden fazla trigger gerekiyorsa **+ Trigger Ekle** ile her trigger için adı ve
+bağlı olduğu tabloyu girin. Aktarım başlamadan tümü kapatılır; işlem sonunda
+ters sırayla geri açılır.
+
 Her satır kendi SQL transaction'ında işlenir. Bir satırın hatası diğer satırları
 engellemez. Trigger geri açılamazsa uygulama kırmızı kritik uyarı verir; SQL
 Server'da `ENABLE TRIGGER ... ON ...` komutunu çalıştırmadan devam etmeyin.

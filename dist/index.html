@@ -44,11 +44,11 @@
         <label for="password" class="sqlonly">Şifre</label>
         <input id="password" type="password" class="sqlonly" autocomplete="off" />
 
-        <label for="trigger">Trigger</label>
-        <input id="trigger" type="text" value="dbo.tr_Siparis_ForinsertUpdate" spellcheck="false" />
-
-        <label for="triggerTable">Trigger'ın Tablosu</label>
-        <input id="triggerTable" type="text" value="dbo.SIPARISLER" spellcheck="false" />
+        <label>Yönetilecek Trigger'lar</label>
+        <div class="trigger-config">
+          <div id="triggerList"></div>
+          <button id="btnAddTrigger" type="button" class="btn btn-sm">+ Trigger Ekle</button>
+        </div>
 
         <label for="cariTipi">Cari Tipi</label>
         <select id="cariTipi">

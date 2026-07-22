@@ -45,38 +45,41 @@ async fn backup_database(
 
 /// Trigger'ın mevcut durumunu (etkin/devre dışı) döner — UI'da göstermek için.
 #[tauri::command]
-async fn trigger_status(cfg: DbConfig, trigger: TriggerCfg) -> Result<String, String> {
-    let name = trigger
-        .name
-        .trim()
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .trim_matches(|c| c == '[' || c == ']')
-        .to_string();
-
-    if name.is_empty() {
-        return Ok("Trigger tanımlı değil.".into());
+async fn trigger_status(cfg: DbConfig, triggers: Vec<TriggerCfg>) -> Result<String, String> {
+    if triggers.is_empty() {
+        return Ok("Yönetilecek trigger tanımlı değil.".into());
     }
-
     let mut client = db::connect(&cfg).await?;
-
-    let rows = client
-        .query(
-            "SELECT is_disabled FROM sys.triggers WHERE name = @P1",
-            &[&name],
-        )
-        .await
-        .map_err(|e| format!("Trigger sorgulanamadı: {e}"))?
-        .into_first_result()
-        .await
-        .map_err(|e| format!("Trigger sonucu okunamadı: {e}"))?;
-
-    match rows.into_iter().next().and_then(|r| r.get::<bool, _>(0)) {
-        Some(true) => Ok(format!("'{name}' şu anda DEVRE DIŞI.")),
-        Some(false) => Ok(format!("'{name}' şu anda ETKİN.")),
-        None => Err(format!("'{name}' adlı trigger bulunamadı.")),
+    let mut messages = Vec::with_capacity(triggers.len());
+    for trigger in triggers {
+        let name = trigger
+            .name
+            .trim()
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .trim_matches(|c| c == '[' || c == ']')
+            .to_string();
+        if name.is_empty() {
+            return Err("Boş trigger adı.".into());
+        }
+        let rows = client
+            .query(
+                "SELECT is_disabled FROM sys.triggers WHERE name = @P1",
+                &[&name],
+            )
+            .await
+            .map_err(|e| format!("Trigger sorgulanamadı: {e}"))?
+            .into_first_result()
+            .await
+            .map_err(|e| format!("Trigger sonucu okunamadı: {e}"))?;
+        match rows.into_iter().next().and_then(|r| r.get::<bool, _>(0)) {
+            Some(true) => messages.push(format!("'{name}' şu anda DEVRE DIŞI.")),
+            Some(false) => messages.push(format!("'{name}' şu anda ETKİN.")),
+            None => return Err(format!("'{name}' adlı trigger bulunamadı.")),
+        }
     }
+    Ok(messages.join("\n"))
 }
 
 #[tauri::command]
@@ -88,7 +91,7 @@ fn cancel_transfer(state: tauri::State<'_, AppState>) {
 #[tauri::command]
 async fn run_transfer(
     cfg: DbConfig,
-    trigger: TriggerCfg,
+    triggers: Vec<TriggerCfg>,
     rows: Vec<TransferRow>,
     cari_tipi: i32,
     user_id: i32,
@@ -105,16 +108,15 @@ async fn run_transfer(
 
     // Trigger adları DDL'e string olarak gömülecek — önce katı doğrulama.
     // Boş bırakılırsa trigger yönetimi tamamen atlanır.
-    let manage_trigger = !trigger.name.trim().is_empty() && !trigger.table.trim().is_empty();
-
-    let (trig_ident, table_ident) = if manage_trigger {
-        (
-            db::validate_qualified_ident(&trigger.name)?,
-            db::validate_qualified_ident(&trigger.table)?,
-        )
-    } else {
-        (String::new(), String::new())
-    };
+    let trigger_idents: Vec<(String, String)> = triggers
+        .iter()
+        .map(|trigger| {
+            Ok((
+                db::validate_qualified_ident(&trigger.name)?,
+                db::validate_qualified_ident(&trigger.table)?,
+            ))
+        })
+        .collect::<Result<_, String>>()?;
 
     let mut client = db::connect(&cfg).await?;
 
@@ -125,8 +127,17 @@ async fn run_transfer(
     }
 
     // --- Trigger'ı kapat ---------------------------------------------------
-    if manage_trigger {
-        db::set_trigger(&mut client, &trig_ident, &table_ident, false).await?;
+    let mut disabled_triggers: Vec<(String, String)> = Vec::new();
+    for (trig_ident, table_ident) in &trigger_idents {
+        if let Err(error) = db::set_trigger(&mut client, trig_ident, table_ident, false).await {
+            for (disabled_trigger, disabled_table) in disabled_triggers.iter().rev() {
+                let _ = db::set_trigger(&mut client, disabled_trigger, disabled_table, true).await;
+            }
+            return Err(format!(
+                "'{trig_ident}' devre dışı bırakılamadı: {error}. Önceden kapatılan trigger'lar geri açılmaya çalışıldı."
+            ));
+        }
+        disabled_triggers.push((trig_ident.clone(), table_ident.clone()));
         let _ = window.emit(
             "log",
             format!("Trigger devre dışı bırakıldı: {trig_ident} ON {table_ident}"),
@@ -194,24 +205,31 @@ async fn run_transfer(
     }
 
     // --- Trigger'ı MUTLAKA geri aç -----------------------------------------
-    let (trigger_restored, trigger_message) = if manage_trigger {
-        match db::set_trigger(&mut client, &trig_ident, &table_ident, true).await {
-            Ok(()) => {
-                let m = format!("Trigger tekrar etkinleştirildi: {trig_ident}");
-                let _ = window.emit("log", m.clone());
-                (true, m)
-            }
-            Err(e) => {
-                let m = format!(
-                    "KRİTİK: Trigger GERİ AÇILAMADI ({e}). \
-                     Lütfen SSMS'te şunu çalıştırın: ENABLE TRIGGER {trig_ident} ON {table_ident}"
-                );
-                let _ = window.emit("trigger-alert", m.clone());
-                (false, m)
+    let (trigger_restored, trigger_message) = if disabled_triggers.is_empty() {
+        (true, "Trigger yönetimi atlandı.".to_string())
+    } else {
+        let mut restore_errors = Vec::new();
+        for (trig_ident, table_ident) in disabled_triggers.iter().rev() {
+            match db::set_trigger(&mut client, trig_ident, table_ident, true).await {
+                Ok(()) => {
+                    let m = format!("Trigger tekrar etkinleştirildi: {trig_ident}");
+                    let _ = window.emit("log", m);
+                }
+                Err(e) => restore_errors.push(format!(
+                    "ENABLE TRIGGER {trig_ident} ON {table_ident} ({e})"
+                )),
             }
         }
-    } else {
-        (true, "Trigger yönetimi atlandı.".to_string())
+        if restore_errors.is_empty() {
+            (true, "Tüm trigger'lar tekrar etkinleştirildi.".to_string())
+        } else {
+            let m = format!(
+                "KRİTİK: Bazı trigger'lar geri açılamadı. SSMS'te çalıştırın:\n{}",
+                restore_errors.join("\n")
+            );
+            let _ = window.emit("trigger-alert", m.clone());
+            (false, m)
+        }
     };
 
     Ok(TransferSummary {
@@ -226,14 +244,16 @@ async fn run_transfer(
 
 /// Trigger geri açılamadıysa kullanıcının UI'dan tekrar denemesi için.
 #[tauri::command]
-async fn enable_trigger(cfg: DbConfig, trigger: TriggerCfg) -> Result<String, String> {
-    let trig = db::validate_qualified_ident(&trigger.name)?;
-    let table = db::validate_qualified_ident(&trigger.table)?;
-
+async fn enable_trigger(cfg: DbConfig, triggers: Vec<TriggerCfg>) -> Result<String, String> {
     let mut client = db::connect(&cfg).await?;
-    db::set_trigger(&mut client, &trig, &table, true).await?;
-
-    Ok(format!("Trigger etkinleştirildi: {trig} ON {table}"))
+    let mut messages = Vec::new();
+    for trigger in triggers {
+        let trig = db::validate_qualified_ident(&trigger.name)?;
+        let table = db::validate_qualified_ident(&trigger.table)?;
+        db::set_trigger(&mut client, &trig, &table, true).await?;
+        messages.push(format!("Trigger etkinleştirildi: {trig} ON {table}"));
+    }
+    Ok(messages.join("\n"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

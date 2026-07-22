@@ -143,6 +143,20 @@ body {
 
 .radios { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
+.trigger-config { display: flex; flex-direction: column; gap: 6px; }
+
+.trigger-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 1fr) 28px; gap: 6px; }
+
+.trigger-row input {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid #7a869a;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.trigger-row .row-del { border: 1px solid #9aa2b1; }
+
 label.inline {
   text-align: left !important;
   font-size: 12px;

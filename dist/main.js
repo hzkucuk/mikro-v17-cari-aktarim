@@ -255,11 +255,40 @@ function dbConfig() {
   };
 }
 
-function triggerCfg() {
-  return {
-    name: $("trigger").value.trim(),
-    table: $("triggerTable").value.trim(),
-  };
+function addTrigger(name = "", table = "") {
+  const row = document.createElement("div");
+  row.className = "trigger-row";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.placeholder = "Trigger adı (örn. dbo.tr_...)";
+  nameInput.value = name;
+  nameInput.spellcheck = false;
+  const tableInput = document.createElement("input");
+  tableInput.type = "text";
+  tableInput.placeholder = "Tablo (örn. dbo.SIPARISLER)";
+  tableInput.value = table;
+  tableInput.spellcheck = false;
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "row-del";
+  remove.textContent = "✕";
+  remove.title = "Trigger'ı listeden çıkar";
+  remove.addEventListener("click", () => {
+    if (!running) row.remove();
+  });
+  [nameInput, tableInput].forEach((input) => input.addEventListener("input", invalidateConnection));
+  row.append(nameInput, tableInput, remove);
+  row._refs = { name: nameInput, table: tableInput };
+  $("triggerList").appendChild(row);
+}
+
+function triggerCfgs() {
+  const triggers = [...$("triggerList").children]
+    .map((row) => ({ name: row._refs.name.value.trim(), table: row._refs.table.value.trim() }))
+    .filter((trigger) => trigger.name || trigger.table);
+  const incomplete = triggers.find((trigger) => !trigger.name || !trigger.table);
+  if (incomplete) throw new Error("Her trigger için hem adı hem de tablosu girilmeli.");
+  return triggers;
 }
 
 function syncAuthFields() {
@@ -403,10 +432,7 @@ async function checkForUpdate(interactive = true) {
 async function checkTrigger() {
   $("btnTrigger").disabled = true;
   try {
-    const info = await invoke("trigger_status", {
-      cfg: dbConfig(),
-      trigger: triggerCfg(),
-    });
+    const info = await invoke("trigger_status", { cfg: dbConfig(), triggers: triggerCfgs() });
     log(info, info.includes("DEVRE DIŞI") ? "warn" : "info");
     await showModal("Trigger Durumu", info);
   } catch (e) {
@@ -420,10 +446,7 @@ async function checkTrigger() {
 async function enableTriggerManually() {
   $("btnEnable").disabled = true;
   try {
-    const info = await invoke("enable_trigger", {
-      cfg: dbConfig(),
-      trigger: triggerCfg(),
-    });
+    const info = await invoke("enable_trigger", { cfg: dbConfig(), triggers: triggerCfgs() });
     log(info, "ok");
     await showModal("Trigger", info, { kind: "success" });
   } catch (e) {
@@ -436,6 +459,13 @@ async function enableTriggerManually() {
 
 async function runTransfer() {
   const rows = collectRows();
+  let triggers;
+  try {
+    triggers = triggerCfgs();
+  } catch (e) {
+    await showModal("Trigger Ayarı", e.message, { kind: "danger" });
+    return;
+  }
 
   if (rows.length === 0) {
     await showModal("Uyarı", "Aktarılacak satır yok.", { kind: "danger" });
@@ -453,7 +483,7 @@ async function runTransfer() {
     `${rows.length} satır aktarılacak.\n` +
     `  • ${silCount} satırda eski kart SİLİNECEK (yeniden adlandırma)\n` +
     `  • ${rows.length - silCount} satırda eski kart korunacak (kopyalama)\n\n` +
-    `Trigger: ${$("trigger").value || "(yönetilmeyecek)"}\n` +
+    `Trigger: ${triggers.length ? triggers.map((t) => t.name).join(", ") : "(yönetilmeyecek)"}\n` +
     `Veritabanı: ${$("database").value} @ ${$("server").value}\n\n` +
     `Bu işlem GERİ ALINAMAZ. Yedeğinizi aldınız mı?\n` +
     `Mikro uygulamasının kapalı olduğundan emin olun.`;
@@ -481,7 +511,7 @@ async function runTransfer() {
   try {
     const summary = await invoke("run_transfer", {
       cfg: dbConfig(),
-      trigger: triggerCfg(),
+      triggers,
       rows,
       cariTipi: parseInt($("cariTipi").value, 10),
       userId: parseInt($("userId").value, 10) || 0,
@@ -554,6 +584,7 @@ async function wireEvents() {
 
 function init() {
   addRow();
+  addTrigger("dbo.tr_Siparis_ForinsertUpdate", "dbo.SIPARISLER");
   syncAuthFields();
 
   $("btnAddRow").addEventListener("click", () => addRow());
@@ -580,6 +611,7 @@ function init() {
   });
 
   $("btnTest").addEventListener("click", testConnection);
+  $("btnAddTrigger").addEventListener("click", () => addTrigger());
   $("btnBackup").addEventListener("click", takeBackup);
   $("btnUpdate").addEventListener("click", () => checkForUpdate(true));
   $("btnTrigger").addEventListener("click", checkTrigger);
