@@ -26,6 +26,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["msi", "nsis"],
     "icon": [
       "icons/32x32.png",
@@ -42,6 +43,14 @@
         "installMode": "currentUser",
         "languages": ["turkish", "english"]
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2N0JFMzdENjIyNTM1RTMKUldUak5TVmlmZU43VnZTZFZQYjRsdFFOVUlNMEsrNFdQNW05dVlaYXBrR2RNQ2JuM2J2NXl0ODkK",
+      "endpoints": [
+        "https://github.com/hzkucuk/mikro-v17-cari-aktarim/releases/latest/download/latest.json"
+      ]
     }
   }
 }

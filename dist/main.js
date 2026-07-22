@@ -361,6 +361,45 @@ async function takeBackup() {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* İmzalı otomatik güncelleme                                          */
+/* ------------------------------------------------------------------ */
+
+async function checkForUpdate(interactive = true) {
+  const button = $("btnUpdate");
+  if (interactive) button.disabled = true;
+  try {
+    // Updater plug-in'in Tauri 2 IPC komutu; paket ve imza doğrulaması Rust
+    // tarafında yapılır. İmzalanmamış bir paket asla kurulmaz.
+    const update = await invoke("plugin:updater|check", {});
+    if (!update) {
+      if (interactive) await showModal("Güncelleme", "Uygulama güncel.", { kind: "success" });
+      return;
+    }
+
+    const notes = update.body ? `\n\nSürüm notları:\n${update.body}` : "";
+    const install = await showModal(
+      "Yeni Sürüm Hazır",
+      `v${update.version} sürümü bulundu. İndirilip kurulacak; uygulama yeniden başlayacak.${notes}`,
+      { buttons: [{ label: "Sonra", value: false }, { label: "İndir ve Kur", value: true, cls: "btn-green" }] }
+    );
+    if (!install) return;
+
+    button.textContent = "Güncelleme indiriliyor…";
+    await invoke("plugin:updater|download_and_install", { rid: update.rid });
+  } catch (e) {
+    // İlk yayınlarda latest.json henüz oluşmamış olabilir; otomatik denetim
+    // kullanıcıyı rahatsız etmez, elle denetimde hata açıkça gösterilir.
+    if (interactive) {
+      log("Güncelleme denetimi başarısız: " + e, "error");
+      await showModal("Güncelleme Hatası", String(e), { kind: "danger" });
+    }
+  } finally {
+    button.textContent = "Güncelleme Denetle";
+    button.disabled = false;
+  }
+}
+
 async function checkTrigger() {
   $("btnTrigger").disabled = true;
   try {
@@ -542,6 +581,7 @@ function init() {
 
   $("btnTest").addEventListener("click", testConnection);
   $("btnBackup").addEventListener("click", takeBackup);
+  $("btnUpdate").addEventListener("click", () => checkForUpdate(true));
   $("btnTrigger").addEventListener("click", checkTrigger);
   $("btnEnable").addEventListener("click", enableTriggerManually);
   $("btnRun").addEventListener("click", runTransfer);
@@ -570,6 +610,8 @@ function init() {
 
   wireEvents();
   log("Uygulama hazır. Önce bağlantıyı test edin.");
+  // Başlangıçta sessiz kontrol; güncelleme varsa kullanıcıya sorulur.
+  setTimeout(() => checkForUpdate(false), 1200);
 }
 
 window.addEventListener("DOMContentLoaded", init);

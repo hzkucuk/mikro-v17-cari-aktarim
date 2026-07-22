@@ -15,6 +15,14 @@ ve iş bittiğinde tekrar açar.
 
 Node/npm gerekmez; arayüz `dist/` altında hazır statik dosyadır.
 
+## Otomatik güncelleme
+
+Uygulama, GitHub Releases altındaki imzalı NSIS güncelleme paketlerini kontrol
+eder. CI, paketleri `TAURI_SIGNING_PRIVATE_KEY` GitHub secret'ı ile imzalar;
+özel anahtar hiçbir zaman repoya eklenmez. Yeni sürüm yayınlanırken normal
+kurulum dosyasına ek olarak imzalı `.nsis.zip`, `.sig` ve `latest.json` dosyası
+aynı GitHub Release'e yüklenmelidir.
+
 ## Derleme
 
 `build.bat` dosyasına çift tıklayın. Çıktı, `src-tauri/target/release/bundle/`
