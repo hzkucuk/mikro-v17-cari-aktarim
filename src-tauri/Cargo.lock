@@ -313,7 +313,7 @@ dependencies = [
 
 [[package]]
 name = "cari-aktarim"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "futures-util",
  "serde",

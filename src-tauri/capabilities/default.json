@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Ana pencere için varsayılan yetkiler (invoke + event listen).",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "updater:default"]
 }
