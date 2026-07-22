@@ -85,9 +85,17 @@
       <div class="panel-head">
         Aktarılacak Cari Kartları
         <div class="head-actions">
+          <button id="btnImportCsv" class="btn btn-sm">CSV İçeri Aktar</button>
           <button id="btnAddRow" class="btn btn-sm">+ Satır</button>
           <button id="btnClear" class="btn btn-sm">Temizle</button>
         </div>
+      </div>
+
+      <input id="csvFile" type="file" accept=".csv,text/csv,text/plain" hidden />
+
+      <div class="import-hint">
+        CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>.
+        İlk iki sütun zorunludur; üçüncü sütun boşsa eski kart silinir.
       </div>
 
       <table class="mikro-grid">

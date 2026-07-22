@@ -156,6 +156,86 @@ function resetStatuses() {
 }
 
 /* ------------------------------------------------------------------ */
+/* CSV içe aktarma                                                     */
+/* ------------------------------------------------------------------ */
+
+function csvDelimiter(text) {
+  const firstLine = text.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0] || "";
+  const candidates = [";", ",", "\t"];
+  return candidates.reduce(
+    (best, delimiter) => (firstLine.split(delimiter).length > firstLine.split(best).length ? delimiter : best),
+    ";"
+  );
+}
+
+/** RFC 4180'deki çift tırnak kuralını destekleyen küçük CSV okuyucu. */
+function parseCsv(text) {
+  const delimiter = csvDelimiter(text);
+  const rows = [];
+  let row = [];
+  let value = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (quoted && text[i + 1] === '"') {
+        value += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (!quoted && ch === delimiter) {
+      row.push(value.trim());
+      value = "";
+    } else if (!quoted && (ch === "\n" || ch === "\r")) {
+      if (ch === "\r" && text[i + 1] === "\n") i += 1;
+      row.push(value.trim());
+      if (row.some((cell) => cell !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += ch;
+    }
+  }
+
+  row.push(value.trim());
+  if (row.some((cell) => cell !== "")) rows.push(row);
+  return rows;
+}
+
+function hasCsvHeader(row) {
+  const first = (row[0] || "").toLocaleLowerCase("tr-TR");
+  const second = (row[1] || "").toLocaleLowerCase("tr-TR");
+  return first.includes("eski") || first.includes("kaynak") || second.includes("yeni") || second.includes("hedef");
+}
+
+function parseSil(value) {
+  const normalized = String(value || "").trim().toLocaleLowerCase("tr-TR");
+  return !["0", "hayır", "hayir", "false", "no", "kalsın", "kalsin"].includes(normalized);
+}
+
+async function importCsv(file) {
+  const text = (await file.text()).replace(/^\uFEFF/, "");
+  const parsed = parseCsv(text);
+  const data = hasCsvHeader(parsed[0] || []) ? parsed.slice(1) : parsed;
+  const rows = data.filter((row) => row[0] || row[1]);
+
+  if (!rows.length) throw new Error("CSV içinde aktarılacak satır bulunamadı.");
+  const incomplete = rows.find((row) => !row[0] || !row[1]);
+  if (incomplete) throw new Error("CSV'de eski veya yeni cari kodu boş olan satır var.");
+
+  const onlyEmptyRow = $("gridBody").children.length === 1 &&
+    !$("gridBody").children[0]._refs.eski.value &&
+    !$("gridBody").children[0]._refs.yeni.value;
+  if (onlyEmptyRow) $("gridBody").textContent = "";
+
+  rows.forEach((row) => addRow(row[0], row[1], parseSil(row[2])));
+  log(`${rows.length} satır CSV'den içeri aktarıldı: ${file.name}`, "ok");
+  await showModal("CSV İçeri Aktarıldı", `${rows.length} satır eklendi. Aktarımı başlatmadan önce listeyi kontrol edin.`, { kind: "success" });
+}
+
+/* ------------------------------------------------------------------ */
 /* Config                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -396,6 +476,20 @@ function init() {
   syncAuthFields();
 
   $("btnAddRow").addEventListener("click", () => addRow());
+  $("btnImportCsv").addEventListener("click", () => {
+    if (!running) $("csvFile").click();
+  });
+  $("csvFile").addEventListener("change", async (event) => {
+    const [file] = event.target.files;
+    event.target.value = "";
+    if (!file || running) return;
+    try {
+      await importCsv(file);
+    } catch (e) {
+      log("CSV içeri aktarılamadı: " + e.message, "error");
+      await showModal("CSV Hatası", e.message, { kind: "danger" });
+    }
+  });
   $("btnClear").addEventListener("click", () => {
     if (running) return;
     $("gridBody").textContent = "";

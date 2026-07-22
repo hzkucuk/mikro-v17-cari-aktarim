@@ -34,9 +34,12 @@ python tools\make_icon.py
 
 1. Veritabanının yedeğini alın ve Mikro'yu kapatın.
 2. Bağlantı bilgilerini girip **Bağlantıyı Test Et** düğmesine basın.
-3. Cari kodlarını ekleyin; işaretli **Eski Kart Silinsin** seçeneği kartı
+3. Cari kodlarını elle ekleyin veya **CSV İçeri Aktar** ile yükleyin. CSV'nin
+   ilk iki sütunu eski ve yeni cari kodudur; isteğe bağlı üçüncü sütundaki
+   `0`, `Hayır` veya `Kalsın` değeri eski kartın korunacağını belirtir.
+4. İşaretli **Eski Kart Silinsin** seçeneği kartı
    yeniden adlandırır, işaretsiz seçenek eski kartı koruyup yeni kart oluşturur.
-4. Aktarımı onaylayın ve işlem günlüğünü kontrol edin.
+5. Aktarımı onaylayın ve işlem günlüğünü kontrol edin.
 
 Her satır kendi SQL transaction'ında işlenir. Bir satırın hatası diğer satırları
 engellemez. Trigger geri açılamazsa uygulama kırmızı kritik uyarı verir; SQL
