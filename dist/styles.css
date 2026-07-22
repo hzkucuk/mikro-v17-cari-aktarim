@@ -10,33 +10,35 @@ html, body {
 }
 
 body {
-  font-family: "Segoe UI", Tahoma, sans-serif;
+  font-family: Inter, "Segoe UI", Tahoma, sans-serif;
   font-size: 13px;
-  color: #1a1a1a;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #172033;
+  background: #f4f7fb;
   overflow-y: auto;
 }
 
 .app {
-  max-width: 1240px;
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
-  padding: 16px 16px 40px;
+  padding: 20px clamp(16px, 3vw, 42px) 36px;
 }
 
 /* ---------- Başlık ---------- */
 
 .titlebar {
   background: #fff;
-  border: 1px solid #000;
-  border-bottom: none;
-  padding: 10px 14px;
+  border: 1px solid #e1e7f0;
+  border-radius: 12px 12px 0 0;
+  padding: 15px 18px;
+  box-shadow: 0 6px 18px rgba(28, 45, 78, 0.06);
 }
 
 .titlebar h1 {
   margin: 0;
-  font-size: 17px;
-  font-weight: 600;
-  color: #1f2a44;
+  font-size: 18px;
+  font-weight: 700;
+  color: #172554;
 }
 
 .modcode {
@@ -58,13 +60,13 @@ body {
 }
 
 .warnband {
-  background: #c62828;
+  background: #b42318;
   color: #fff;
   font-weight: 600;
   font-size: 12px;
   text-align: center;
   padding: 7px 10px;
-  border: 1px solid #000;
+  border: 1px solid #b42318;
   letter-spacing: 0.2px;
 }
 
@@ -72,20 +74,23 @@ body {
 
 .panel {
   background: #fff;
-  border: 1px solid #000;
-  border-top: none;
-  margin-bottom: 0;
+  border: 1px solid #e1e7f0;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  box-shadow: 0 3px 12px rgba(28, 45, 78, 0.05);
+  overflow: hidden;
 }
 
-.panel + .panel { margin-top: 12px; border-top: 1px solid #000; }
+.warnband + .panel { border-radius: 0 0 10px 10px; border-top: none; }
+.panel + .panel { margin-top: 0; }
 
 .panel-head {
-  background: #3c4a5e;
+  background: #253858;
   color: #fff;
   font-weight: 600;
   font-size: 12px;
-  padding: 6px 12px;
-  border-bottom: 1px solid #000;
+  padding: 9px 14px;
+  border-bottom: 1px solid #d8e0ec;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -93,7 +98,7 @@ body {
 
 .head-actions { display: flex; gap: 6px; }
 
-.panel-body { padding: 12px; }
+.panel-body { padding: 16px; }
 
 .import-hint {
   padding: 7px 12px;
@@ -111,7 +116,7 @@ body {
 .grid-form {
   display: grid;
   grid-template-columns: 165px minmax(240px, 1fr) 165px minmax(240px, 1fr);
-  gap: 8px 10px;
+  gap: 11px 14px;
   align-items: center;
 }
 
@@ -126,8 +131,10 @@ body {
 .grid-form input[type="number"],
 .grid-form select {
   width: 100%;
-  padding: 5px 7px;
-  border: 1px solid #7a869a;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid #b8c4d5;
+  border-radius: 5px;
   background: #fff;
   font-family: Consolas, "Courier New", monospace;
   font-size: 12.5px;
@@ -149,8 +156,10 @@ body {
 
 .trigger-row input {
   min-width: 0;
-  padding: 5px 7px;
-  border: 1px solid #7a869a;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid #b8c4d5;
+  border-radius: 5px;
   font-family: Consolas, "Courier New", monospace;
   font-size: 12px;
 }
@@ -171,9 +180,9 @@ label.inline {
 /* ---------- Butonlar ---------- */
 
 .panel-actions {
-  padding: 10px 12px;
-  border-top: 1px solid #d0d4dc;
-  background: #f7f8fa;
+  padding: 12px 16px;
+  border-top: 1px solid #e4e9f1;
+  background: #fafcff;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -184,15 +193,15 @@ label.inline {
   font-family: "Segoe UI", Tahoma, sans-serif;
   font-size: 12px;
   font-weight: 600;
-  padding: 6px 14px;
-  border: 1px solid rgba(0, 0, 0, 0.35);
-  border-radius: 2px;
+  padding: 7px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  border-radius: 6px;
   background: #e4e7ec;
   color: #1a1a1a;
   cursor: pointer;
 }
 
-.btn:hover:not(:disabled) { filter: brightness(1.08); }
+.btn:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 
 .btn:disabled {
@@ -201,7 +210,7 @@ label.inline {
 }
 
 .btn-sm { padding: 2px 9px; font-size: 11px; font-weight: 500; }
-.btn-blue  { background: #1d6fd0; color: #fff; }
+.btn-blue  { background: #2563eb; color: #fff; }
 .btn-green { background: #17803d; color: #fff; }
 .btn-red   { background: #c62828; color: #fff; }
 .btn-amber { background: #b45309; color: #fff; }
@@ -220,23 +229,24 @@ label.inline {
 
 .mikro-grid {
   width: 100%;
+  min-width: 860px;
   border-collapse: collapse;
   font-size: 12.5px;
 }
 
 .mikro-grid thead th {
-  background: #d6dae2;
+  background: #e9eef6;
   color: #1f2a44;
   font-weight: 600;
   font-size: 11.5px;
   text-align: left;
   padding: 5px 7px;
-  border: 1px solid #000;
+  border: 1px solid #cfd8e6;
   white-space: nowrap;
 }
 
 .mikro-grid td {
-  border: 1px solid #9aa2b1;
+  border: 1px solid #d9e0ea;
   padding: 0;
   background: #fff;
 }
@@ -335,7 +345,7 @@ label.inline {
 /* ---------- Log ---------- */
 
 .log {
-  height: 190px;
+  height: min(220px, 30vh);
   overflow-y: auto;
   background: #14181f;
   color: #d7dce4;
@@ -370,7 +380,9 @@ label.inline {
 
 .modal {
   background: #fff;
-  border: 1px solid #000;
+  border: 1px solid #d4dce8;
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.3);
   max-width: 640px;
   width: 100%;
   max-height: 80vh;
@@ -379,7 +391,7 @@ label.inline {
 }
 
 .modal-head {
-  background: #3c4a5e;
+  background: #253858;
   color: #fff;
   font-weight: 600;
   font-size: 12.5px;
@@ -407,4 +419,27 @@ label.inline {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* ---------- Dar pencere / responsive ---------- */
+
+@media (max-width: 900px) {
+  .app { padding: 14px; }
+  .grid-form { grid-template-columns: 150px minmax(0, 1fr); }
+  .grid-form > :nth-child(4n + 3) { grid-column: 1; }
+  .grid-form > :nth-child(4n + 4) { grid-column: 2; }
+  .panel { overflow-x: auto; }
+}
+
+@media (max-width: 620px) {
+  .app { padding: 0; }
+  .titlebar { border-radius: 0; }
+  .panel, .warnband + .panel { border-radius: 0; }
+  .grid-form { grid-template-columns: 1fr; }
+  .grid-form label { text-align: left; margin-top: 3px; }
+  .grid-form > :nth-child(4n + 3), .grid-form > :nth-child(4n + 4) { grid-column: auto; }
+  .panel-head { align-items: flex-start; gap: 8px; }
+  .head-actions, .panel-actions { flex-wrap: wrap; }
+  .conn-state { width: 100%; margin-left: 0; }
+  .trigger-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 28px; }
 }
