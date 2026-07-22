@@ -29,6 +29,9 @@
         <label for="database">Veritabanı</label>
         <input id="database" type="text" value="MikroDesktop_BEDIR_2017" spellcheck="false" />
 
+        <label for="backupDirectory">SQL Server Yedek Klasörü</label>
+        <input id="backupDirectory" type="text" value="C:\\MikroYedek" spellcheck="false" title="Bu klasör SQL Server'ın çalıştığı makinede veya onun erişebildiği UNC paylaşımında olmalıdır." />
+
         <label>Kimlik Doğrulama</label>
         <div class="radios">
           <label class="inline"><input type="radio" name="auth" value="windows" checked /> Windows Integrated</label>
@@ -74,6 +77,7 @@
 
       <div class="panel-actions">
         <button id="btnTest" class="btn btn-blue">Bağlantıyı Test Et</button>
+        <button id="btnBackup" class="btn btn-red" disabled>Önce Yedek Al</button>
         <button id="btnTrigger" class="btn btn-gray">Trigger Durumu</button>
         <button id="btnEnable" class="btn btn-amber" title="Aktarım yarıda kaldıysa trigger'ı elle geri açar">Trigger'ı Geri Aç</button>
         <span id="connState" class="conn-state">Bağlantı test edilmedi</span>
@@ -118,7 +122,7 @@
       </div>
 
       <div class="panel-actions">
-        <button id="btnRun" class="btn btn-green" disabled>Aktarımı Başlat</button>
+        <button id="btnRun" class="btn btn-green" disabled title="Aktarımdan önce başarıyla yedek alınmalıdır.">Aktarımı Başlat</button>
         <button id="btnCancel" class="btn btn-red" disabled>İptal</button>
       </div>
     </section>

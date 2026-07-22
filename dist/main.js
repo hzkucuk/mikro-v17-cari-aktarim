@@ -8,6 +8,7 @@ const $ = (id) => document.getElementById(id);
 
 let running = false;
 let connectionOk = false;
+let backupOk = false;
 
 /* ------------------------------------------------------------------ */
 /* Log                                                                 */
@@ -276,9 +277,11 @@ function setConnState(text, cls) {
 
 /** Bağlantı ayarı değişince testi geçersiz kıl. */
 function invalidateConnection() {
-  if (!connectionOk || running) return;
+  if (running) return;
   connectionOk = false;
+  backupOk = false;
   $("btnRun").disabled = true;
+  $("btnBackup").disabled = true;
   setConnState("Ayar değişti — tekrar test edin", "");
 }
 
@@ -304,18 +307,57 @@ async function testConnection() {
   try {
     const info = await invoke("test_connection", { cfg: dbConfig() });
     connectionOk = true;
-    $("btnRun").disabled = false;
-    setConnState("Bağlantı hazır", "ok");
+    backupOk = false;
+    $("btnBackup").disabled = false;
+    $("btnRun").disabled = true;
+    setConnState("Bağlantı hazır — yedek alınmalı", "ok");
     log("Bağlantı başarılı.", "ok");
     await showModal("Bağlantı Testi", info, { kind: "success" });
   } catch (e) {
     connectionOk = false;
+    backupOk = false;
+    $("btnBackup").disabled = true;
     $("btnRun").disabled = true;
     setConnState("Bağlantı başarısız", "bad");
     log("Bağlantı hatası: " + e, "error");
     await showModal("Bağlantı Hatası", String(e), { kind: "danger" });
   } finally {
     $("btnTest").disabled = false;
+  }
+}
+
+async function takeBackup() {
+  const directory = $("backupDirectory").value.trim();
+  if (!directory) {
+    await showModal("Yedek Klasörü", "SQL Server'ın erişebildiği yedek klasörünü girin.", { kind: "danger" });
+    return;
+  }
+
+  const confirm = await showModal(
+    "Yedek Al",
+    `SQL Server üzerinde tam COPY_ONLY yedek alınacak.\n\nKlasör: ${directory}\n\nBu klasöre SQL Server hizmet hesabının yazma yetkisi olmalıdır.`,
+    { buttons: [{ label: "Vazgeç", value: false }, { label: "Yedeği Al", value: true, cls: "btn-red" }] }
+  );
+  if (!confirm) return;
+
+  $("btnBackup").disabled = true;
+  setConnState("Yedek alınıyor…", "");
+  log(`Ön yedek başlatıldı: ${directory}`, "warn");
+  try {
+    const result = await invoke("backup_database", { cfg: dbConfig(), backupDirectory: directory });
+    backupOk = true;
+    $("btnRun").disabled = false;
+    setConnState("Yedek hazır — aktarım yapılabilir", "ok");
+    log(result.message, "ok");
+    await showModal("Yedek Tamamlandı", result.message, { kind: "success" });
+  } catch (e) {
+    backupOk = false;
+    $("btnRun").disabled = true;
+    setConnState("Yedek alınamadı", "bad");
+    log("Yedek hatası: " + e, "error");
+    await showModal("Yedek Hatası", String(e), { kind: "danger" });
+  } finally {
+    $("btnBackup").disabled = !connectionOk;
   }
 }
 
@@ -433,7 +475,7 @@ async function runTransfer() {
     await showModal("Aktarım Hatası", String(e), { kind: "danger" });
   } finally {
     running = false;
-    $("btnRun").disabled = !connectionOk;
+    $("btnRun").disabled = !connectionOk || !backupOk;
     $("btnTest").disabled = false;
     $("btnCancel").disabled = true;
   }
@@ -499,6 +541,7 @@ function init() {
   });
 
   $("btnTest").addEventListener("click", testConnection);
+  $("btnBackup").addEventListener("click", takeBackup);
   $("btnTrigger").addEventListener("click", checkTrigger);
   $("btnEnable").addEventListener("click", enableTriggerManually);
   $("btnRun").addEventListener("click", runTransfer);
@@ -521,7 +564,7 @@ function init() {
     })
   );
 
-  ["server", "database", "username", "password"].forEach((id) =>
+  ["server", "database", "username", "password", "backupDirectory"].forEach((id) =>
     $(id).addEventListener("input", invalidateConnection)
   );
 

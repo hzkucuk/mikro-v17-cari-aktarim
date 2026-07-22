@@ -32,8 +32,11 @@ python tools\make_icon.py
 
 ## Kullanım güvenliği
 
-1. Veritabanının yedeğini alın ve Mikro'yu kapatın.
-2. Bağlantı bilgilerini girip **Bağlantıyı Test Et** düğmesine basın.
+1. Mikro'yu kapatın. SQL Server'ın yazabildiği bir yedek klasörü belirleyin
+   (sunucudaki klasör veya UNC paylaşımı).
+2. Bağlantı bilgilerini girip **Bağlantıyı Test Et**, ardından **Önce Yedek Al**
+   düğmesine basın. Uygulama, yedek tamamlanmadan aktarımı açmaz. Yedek
+   `COPY_ONLY` tam yedektir; mevcut SQL Server yedekleme zincirini etkilemez.
 3. Cari kodlarını elle ekleyin veya **CSV İçeri Aktar** ile yükleyin. CSV'nin
    ilk iki sütunu eski ve yeni cari kodudur; isteğe bağlı üçüncü sütundaki
    `0`, `Hayır` veya `Kalsın` değeri eski kartın korunacağını belirtir.

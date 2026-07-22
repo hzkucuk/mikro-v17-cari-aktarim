@@ -35,6 +35,14 @@ async fn test_connection(cfg: DbConfig) -> Result<String, String> {
     Ok(info)
 }
 
+#[tauri::command]
+async fn backup_database(
+    cfg: DbConfig,
+    backup_directory: String,
+) -> Result<db::BackupResult, String> {
+    db::backup_database(&cfg, &backup_directory).await
+}
+
 /// Trigger'ın mevcut durumunu (etkin/devre dışı) döner — UI'da göstermek için.
 #[tauri::command]
 async fn trigger_status(cfg: DbConfig, trigger: TriggerCfg) -> Result<String, String> {
@@ -237,6 +245,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             test_connection,
+            backup_database,
             trigger_status,
             run_transfer,
             cancel_transfer,

@@ -82,6 +82,13 @@ pub struct TransferSummary {
     pub errors: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupResult {
+    pub path: String,
+    pub message: String,
+}
+
 // ---------------------------------------------------------------------------
 // Kimlik (identifier) doğrulama
 // ---------------------------------------------------------------------------
@@ -141,6 +148,20 @@ pub fn validate_qualified_ident(raw: &str) -> Result<String, String> {
     }
 
     Ok(out.join("."))
+}
+
+/// Veritabanı adı DDL içinde parametrelenemez. Köşeli parantez kaçışı SQL
+/// Server'ın identifier kuralına uygundur; kontrol karakterleri ise kabul
+/// edilmez. Böylece nokta/boşluk içeren geçerli veritabanı adları da çalışır.
+fn quote_database_ident(raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err("Veritabanı adı boş.".into());
+    }
+    if name.chars().any(char::is_control) {
+        return Err("Veritabanı adı kontrol karakteri içeremez.".into());
+    }
+    Ok(format!("[{}]", name.replace(']', "]]")))
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +292,57 @@ pub async fn check_sp_exists(client: &mut SqlClient) -> Result<bool, String> {
     Ok(cnt > 0)
 }
 
+/// SQL Server'ın GÖRDÜĞÜ klasöre, aktarım öncesi COPY_ONLY tam yedek alır.
+/// COPY_ONLY mevcut diferansiyel/log yedekleme zincirini etkilemez.
+pub async fn backup_database(
+    cfg: &DbConfig,
+    backup_directory: &str,
+) -> Result<BackupResult, String> {
+    let directory = backup_directory.trim().trim_end_matches(['\\', '/']);
+    if directory.is_empty() {
+        return Err(
+            "Yedek klasörü boş. SQL Server'ın erişebildiği bir Windows/UNC klasörü girin.".into(),
+        );
+    }
+
+    let database = quote_database_ident(&cfg.database)?;
+    // Dosya adı, bağlantıdan gelen DB adını güvenle dosya adına dönüştürür.
+    let safe_db_name: String = cfg
+        .database
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Sistem saati okunamadı: {e}"))?
+        .as_secs();
+    let path = format!("{directory}\\{safe_db_name}_cari_aktarim_oncesi_{stamp}.bak");
+
+    let mut client = connect(cfg).await?;
+    let sql = format!(
+        "BACKUP DATABASE {database} TO DISK = @P1 \
+         WITH COPY_ONLY, COMPRESSION, CHECKSUM, STATS = 10"
+    );
+    exec_simple_with_param(&mut client, &sql, &path)
+        .await
+        .map_err(|e| {
+            format!(
+                "Yedek alınamadı: {e}. SQL Server hizmet hesabının '{directory}' klasörüne yazma yetkisini kontrol edin."
+            )
+        })?;
+
+    Ok(BackupResult {
+        path: path.clone(),
+        message: format!("COPY_ONLY tam yedek başarıyla alındı: {path}"),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Yardımcılar
 // ---------------------------------------------------------------------------
@@ -278,6 +350,21 @@ pub async fn check_sp_exists(client: &mut SqlClient) -> Result<bool, String> {
 async fn exec_simple(client: &mut SqlClient, sql: &str) -> Result<(), String> {
     client
         .simple_query(sql)
+        .await
+        .map_err(|e| format!("{e}"))?
+        .into_results()
+        .await
+        .map_err(|e| format!("{e}"))?;
+    Ok(())
+}
+
+async fn exec_simple_with_param(
+    client: &mut SqlClient,
+    sql: &str,
+    value: &str,
+) -> Result<(), String> {
+    client
+        .query(sql, &[&value])
         .await
         .map_err(|e| format!("{e}"))?
         .into_results()
