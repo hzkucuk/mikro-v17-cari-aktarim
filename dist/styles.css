@@ -21,7 +21,8 @@ body {
   width: 100%;
   max-width: none;
   margin: 0 auto;
-  padding: 20px clamp(16px, 3vw, 42px) 36px;
+  min-height: 100vh;
+  padding: 0;
 }
 
 /* ---------- Başlık ---------- */
@@ -29,7 +30,7 @@ body {
 .titlebar {
   background: #fff;
   border: 1px solid #e1e7f0;
-  border-radius: 12px 12px 0 0;
+  border-radius: 0;
   padding: 15px 18px;
   box-shadow: 0 6px 18px rgba(28, 45, 78, 0.06);
 }
@@ -75,14 +76,42 @@ body {
 .panel {
   background: #fff;
   border: 1px solid #e1e7f0;
-  border-radius: 10px;
-  margin-bottom: 14px;
-  box-shadow: 0 3px 12px rgba(28, 45, 78, 0.05);
+  border-radius: 0;
+  margin-bottom: 0;
+  box-shadow: none;
   overflow: hidden;
 }
 
-.warnband + .panel { border-radius: 0 0 10px 10px; border-top: none; }
+.warnband + .panel { border-radius: 0; border-top: none; }
 .panel + .panel { margin-top: 0; }
+
+.splitter {
+  height: 7px;
+  background: #e4eaf3;
+  border-top: 1px solid #cfd8e6;
+  border-bottom: 1px solid #cfd8e6;
+  cursor: row-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.splitter::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 34px;
+  height: 2px;
+  transform: translateX(-50%);
+  background: #9aa9bd;
+  border-radius: 2px;
+}
+
+.splitter:hover, body.is-resizing .splitter { background: #d7e5ff; }
+body.is-resizing { cursor: row-resize; user-select: none; }
+.pane { min-height: 170px; }
+#connectionPanel { min-height: 330px; }
+#transferPanel { min-height: 210px; }
 
 .panel-head {
   background: #253858;
@@ -147,6 +176,36 @@ body {
 }
 
 .grid-form select { font-family: "Segoe UI", Tahoma, sans-serif; }
+
+.path-picker { display: flex; gap: 7px; min-width: 0; }
+.path-picker input { min-width: 0; flex: 1; }
+.path-picker .btn { white-space: nowrap; }
+
+.advanced-options {
+  margin-top: 14px;
+  border-top: 1px solid #e1e7f0;
+  padding-top: 10px;
+}
+
+.advanced-options summary {
+  color: #475569;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.advanced-grid {
+  display: grid;
+  grid-template-columns: 165px minmax(180px, 340px) 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.advanced-grid label { text-align: right; font-size: 12px; }
+.advanced-grid input[type="number"] { min-height: 34px; padding: 6px 9px; border: 1px solid #b8c4d5; border-radius: 5px; }
+.advanced-grid .inline { grid-column: 1 / -1; justify-self: start; }
 
 .radios { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
@@ -424,7 +483,6 @@ label.inline {
 /* ---------- Dar pencere / responsive ---------- */
 
 @media (max-width: 900px) {
-  .app { padding: 14px; }
   .grid-form { grid-template-columns: 150px minmax(0, 1fr); }
   .grid-form > :nth-child(4n + 3) { grid-column: 1; }
   .grid-form > :nth-child(4n + 4) { grid-column: 2; }
@@ -432,7 +490,6 @@ label.inline {
 }
 
 @media (max-width: 620px) {
-  .app { padding: 0; }
   .titlebar { border-radius: 0; }
   .panel, .warnband + .panel { border-radius: 0; }
   .grid-form { grid-template-columns: 1fr; }
@@ -442,4 +499,12 @@ label.inline {
   .head-actions, .panel-actions { flex-wrap: wrap; }
   .conn-state { width: 100%; margin-left: 0; }
   .trigger-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 28px; }
+  .advanced-grid { grid-template-columns: 1fr; }
+  .advanced-grid label { text-align: left; }
+  .advanced-grid .inline { grid-column: auto; }
+}
+
+@media (max-width: 700px) {
+  .splitter { display: none; }
+  .pane { height: auto !important; overflow: visible !important; }
 }

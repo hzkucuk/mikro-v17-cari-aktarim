@@ -126,18 +126,73 @@ async fn run_transfer(
             .into());
     }
 
+    db::ensure_audit_log_table(&mut client).await?;
+    db::ensure_trigger_guard_table(&mut client).await?;
+    let client_machine = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "Bilinmiyor".to_string());
+    let client_user = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
+        (Ok(domain), Ok(user)) if !domain.is_empty() => format!("{domain}\\{user}"),
+        (_, Ok(user)) => user,
+        _ => std::env::var("USER").unwrap_or_else(|_| "Bilinmiyor".to_string()),
+    };
+    let _ = window.emit(
+        "log",
+        format!("SQL denetim kaydı etkin: {client_machine} / {client_user}"),
+    );
+
     // --- Trigger'ı kapat ---------------------------------------------------
-    let mut disabled_triggers: Vec<(String, String)> = Vec::new();
+    let mut disabled_triggers: Vec<(String, String, i64)> = Vec::new();
     for (trig_ident, table_ident) in &trigger_idents {
+        // Önceden devre dışı bırakılmış trigger'ı uygulama açmaz; yalnızca
+        // kendi kapattığı trigger'lar için koruma kaydı tutar.
+        if db::trigger_is_disabled(&mut client, trig_ident).await? {
+            if let Some(orphan_guard) =
+                db::pending_trigger_guard(&mut client, trig_ident, table_ident).await?
+            {
+                db::set_trigger(&mut client, trig_ident, table_ident, true).await?;
+                db::resolve_trigger_guard(
+                    &mut client,
+                    orphan_guard,
+                    "Sonraki çalıştırmada otomatik kurtarıldı",
+                )
+                .await?;
+                let _ = window.emit(
+                    "log",
+                    format!(
+                        "Önceki işlemden açık kalan trigger otomatik geri açıldı: {trig_ident}"
+                    ),
+                );
+            } else {
+                let _ = window.emit("log", format!("Trigger zaten devre dışı: {trig_ident}"));
+                continue;
+            }
+        }
+        let guard_id = db::register_trigger_guard(
+            &mut client,
+            trig_ident,
+            table_ident,
+            &client_machine,
+            &client_user,
+        )
+        .await?;
         if let Err(error) = db::set_trigger(&mut client, trig_ident, table_ident, false).await {
-            for (disabled_trigger, disabled_table) in disabled_triggers.iter().rev() {
+            let _ = db::resolve_trigger_guard(&mut client, guard_id, "Disable başarısız").await;
+            for (disabled_trigger, disabled_table, disabled_guard) in disabled_triggers.iter().rev()
+            {
                 let _ = db::set_trigger(&mut client, disabled_trigger, disabled_table, true).await;
+                let _ = db::resolve_trigger_guard(
+                    &mut client,
+                    *disabled_guard,
+                    "Disable zinciri geri alındı",
+                )
+                .await;
             }
             return Err(format!(
                 "'{trig_ident}' devre dışı bırakılamadı: {error}. Önceden kapatılan trigger'lar geri açılmaya çalışıldı."
             ));
         }
-        disabled_triggers.push((trig_ident.clone(), table_ident.clone()));
+        disabled_triggers.push((trig_ident.clone(), table_ident.clone(), guard_id));
         let _ = window.emit(
             "log",
             format!("Trigger devre dışı bırakıldı: {trig_ident} ON {table_ident}"),
@@ -168,7 +223,17 @@ async fn run_transfer(
             },
         );
 
-        match db::transfer_one(&mut client, row, cari_tipi, user_id, son_deg_guncelle).await {
+        match db::transfer_one(
+            &mut client,
+            row,
+            cari_tipi,
+            user_id,
+            son_deg_guncelle,
+            &client_machine,
+            &client_user,
+        )
+        .await
+        {
             Ok(msg) => {
                 ok += 1;
                 let _ = window.emit(
@@ -182,7 +247,26 @@ async fn run_transfer(
                     },
                 );
             }
-            Err(e) => {
+            Err(mut e) => {
+                if let Err(audit_error) = db::write_audit_log(
+                    &mut client,
+                    db::AuditEntry {
+                        client_machine: &client_machine,
+                        client_user: &client_user,
+                        eski: &row.eski,
+                        yeni: &row.yeni,
+                        cari_tipi,
+                        sil: row.sil,
+                        result: "ERROR",
+                        message: &e,
+                    },
+                )
+                .await
+                {
+                    e.push_str(&format!(
+                        " | HATA denetim kaydı da yazılamadı: {audit_error}"
+                    ));
+                }
                 failed += 1;
                 errors.push(format!("{} → {}: {e}", row.eski, row.yeni));
                 let _ = window.emit(
@@ -209,9 +293,15 @@ async fn run_transfer(
         (true, "Trigger yönetimi atlandı.".to_string())
     } else {
         let mut restore_errors = Vec::new();
-        for (trig_ident, table_ident) in disabled_triggers.iter().rev() {
+        for (trig_ident, table_ident, guard_id) in disabled_triggers.iter().rev() {
             match db::set_trigger(&mut client, trig_ident, table_ident, true).await {
                 Ok(()) => {
+                    let _ = db::resolve_trigger_guard(
+                        &mut client,
+                        *guard_id,
+                        "Normal akışta geri açıldı",
+                    )
+                    .await;
                     let m = format!("Trigger tekrar etkinleştirildi: {trig_ident}");
                     let _ = window.emit("log", m);
                 }
@@ -260,6 +350,7 @@ async fn enable_trigger(cfg: DbConfig, triggers: Vec<TriggerCfg>) -> Result<Stri
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(AppState::default());
             Ok(())

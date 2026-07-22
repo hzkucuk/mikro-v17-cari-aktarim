@@ -19,9 +19,10 @@
     </div>
 
     <!-- ================= Bağlantı / Ayarlar ================= -->
-    <section class="panel">
+    <section id="connectionPanel" class="panel pane" data-min-height="330">
       <div class="panel-head">Bağlantı Ayarları</div>
-      <div class="panel-body grid-form">
+      <div class="panel-body">
+      <div class="grid-form">
 
         <label for="server">Sunucu</label>
         <input id="server" type="text" value="10.0.0.10" spellcheck="false" />
@@ -30,7 +31,10 @@
         <input id="database" type="text" value="MikroDesktop_BEDIR_2017" spellcheck="false" />
 
         <label for="backupDirectory">SQL Server Yedek Klasörü</label>
-        <input id="backupDirectory" type="text" value="C:\MikroYedek" spellcheck="false" title="Bu klasör SQL Server'ın çalıştığı makinede veya onun erişebildiği UNC paylaşımında olmalıdır." />
+        <div class="path-picker">
+          <input id="backupDirectory" type="text" value="C:\MikroYedek" spellcheck="false" title="Bu klasör SQL Server'ın çalıştığı makinede veya onun erişebildiği UNC paylaşımında olmalıdır." />
+          <button id="btnPickBackupDir" type="button" class="btn btn-gray">Klasör Seç…</button>
+        </div>
 
         <label>Kimlik Doğrulama</label>
         <div class="radios">
@@ -63,16 +67,18 @@
           <option value="9">9 — EXIM (ithalat/ihracat)</option>
         </select>
 
-        <label for="userId">Aktif User ID</label>
-        <input id="userId" type="number" value="1" min="0" />
+      </div>
 
-        <label>Seçenekler</label>
-        <div class="radios">
+      <details class="advanced-options">
+        <summary>Gelişmiş ayarlar</summary>
+        <div class="advanced-grid">
+          <label for="userId" title="Mikro kullanıcı tablosundaki işlemi yapan kullanıcının sayısal kimliği. Çoğu kurulumda admin kullanıcı 1'dir.">Aktif User ID</label>
+          <input id="userId" type="number" value="1" min="0" title="Mikro kullanıcı kaydının sayısal kimliği; çoğu kurulumda 1 kullanılır." />
           <label class="inline" title="İşaretlenirse evrakların lastup_date/lastup_user alanları aktarım anıyla damgalanır.">
             <input type="checkbox" id="sonDeg" /> Son değişiklik bilgilerini güncelle
           </label>
         </div>
-
+      </details>
       </div>
 
       <div class="panel-actions">
@@ -85,8 +91,10 @@
       </div>
     </section>
 
+    <div class="splitter" data-panel="connectionPanel" role="separator" aria-label="Bağlantı ayarları yüksekliğini değiştir"></div>
+
     <!-- ================= Aktarım Listesi ================= -->
-    <section class="panel">
+    <section id="transferPanel" class="panel pane" data-min-height="210">
       <div class="panel-head">
         Aktarılacak Cari Kartları
         <div class="head-actions">
@@ -128,8 +136,10 @@
       </div>
     </section>
 
+    <div class="splitter" data-panel="transferPanel" role="separator" aria-label="Aktarım listesi yüksekliğini değiştir"></div>
+
     <!-- ================= Log ================= -->
-    <section class="panel">
+    <section id="logPanel" class="panel pane" data-min-height="170">
       <div class="panel-head">
         İşlem Günlüğü
         <div class="head-actions">

@@ -59,3 +59,11 @@ ters sırayla geri açılır.
 Her satır kendi SQL transaction'ında işlenir. Bir satırın hatası diğer satırları
 engellemez. Trigger geri açılamazsa uygulama kırmızı kritik uyarı verir; SQL
 Server'da `ENABLE TRIGGER ... ON ...` komutunu çalıştırmadan devam etmeyin.
+
+## Denetim kaydı
+
+Uygulama ilk aktarımda `dbo.CARI_AKTARIM_LOG` tablosunu oluşturur. Her başarılı
+ve hatalı satır için tarih, uygulamayı çalıştıran bilgisayar/kullanıcı, SQL
+oturum kullanıcısı, eski/yeni kod, kart silme tercihi ve sonuç mesajı kaydedilir.
+Bu tablo için oluşturma ve ekleme yetkisi zorunludur; denetim kaydı
+yazılamıyorsa aktarım başlatılmaz.

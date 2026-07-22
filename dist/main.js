@@ -157,6 +157,46 @@ function resetStatuses() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Sürüklenebilir panel ayraçları                                     */
+/* ------------------------------------------------------------------ */
+
+function initSplitters() {
+  document.querySelectorAll(".splitter").forEach((splitter) => {
+    splitter.addEventListener("pointerdown", (event) => {
+      if (window.innerWidth < 700) return;
+      const panel = $(splitter.dataset.panel);
+      const startY = event.clientY;
+      const startHeight = panel.getBoundingClientRect().height;
+      const minHeight = Number(panel.dataset.minHeight || 120);
+      // Ayraç altındaki bölümler için ekranda daima en az 220px bırak.
+      // Böylece paneller birbirinin üzerine taşamaz.
+      const maxHeight = Math.max(
+        minHeight,
+        window.innerHeight - panel.getBoundingClientRect().top - 220
+      );
+      splitter.setPointerCapture(event.pointerId);
+      document.body.classList.add("is-resizing");
+
+      const move = (moveEvent) => {
+        const requested = startHeight + moveEvent.clientY - startY;
+        const height = Math.min(maxHeight, Math.max(minHeight, requested));
+        panel.style.height = `${height}px`;
+        panel.style.overflow = "auto";
+      };
+      const end = () => {
+        document.body.classList.remove("is-resizing");
+        splitter.removeEventListener("pointermove", move);
+        splitter.removeEventListener("pointerup", end);
+        splitter.removeEventListener("pointercancel", end);
+      };
+      splitter.addEventListener("pointermove", move);
+      splitter.addEventListener("pointerup", end);
+      splitter.addEventListener("pointercancel", end);
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /* CSV içe aktarma                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -253,6 +293,24 @@ function dbConfig() {
     password: $("password").value,
     trustCert: true,
   };
+}
+
+async function pickBackupDirectory() {
+  try {
+    const selected = await window.__TAURI__.dialog.open({
+      title: "SQL Server yedek klasörünü seçin",
+      directory: true,
+      multiple: false,
+      defaultPath: $("backupDirectory").value.trim() || undefined,
+    });
+    if (selected) {
+      $("backupDirectory").value = selected;
+      invalidateConnection();
+    }
+  } catch (e) {
+    log("Klasör seçilemedi: " + e, "error");
+    await showModal("Klasör Seçimi Hatası", String(e), { kind: "danger" });
+  }
 }
 
 function addTrigger(name = "", table = "") {
@@ -586,6 +644,7 @@ function init() {
   addRow();
   addTrigger("dbo.tr_Siparis_ForinsertUpdate", "dbo.SIPARISLER");
   syncAuthFields();
+  initSplitters();
 
   $("btnAddRow").addEventListener("click", () => addRow());
   $("btnImportCsv").addEventListener("click", () => {
@@ -611,6 +670,7 @@ function init() {
   });
 
   $("btnTest").addEventListener("click", testConnection);
+  $("btnPickBackupDir").addEventListener("click", pickBackupDirectory);
   $("btnAddTrigger").addEventListener("click", () => addTrigger());
   $("btnBackup").addEventListener("click", takeBackup);
   $("btnUpdate").addEventListener("click", () => checkForUpdate(true));

@@ -89,6 +89,18 @@ pub struct BackupResult {
     pub message: String,
 }
 
+/// `dbo.CARI_AKTARIM_LOG` tablosuna yazılan denetim kaydı.
+pub struct AuditEntry<'a> {
+    pub client_machine: &'a str,
+    pub client_user: &'a str,
+    pub eski: &'a str,
+    pub yeni: &'a str,
+    pub cari_tipi: i32,
+    pub sil: bool,
+    pub result: &'a str,
+    pub message: &'a str,
+}
+
 // ---------------------------------------------------------------------------
 // Kimlik (identifier) doğrulama
 // ---------------------------------------------------------------------------
@@ -292,6 +304,153 @@ pub async fn check_sp_exists(client: &mut SqlClient) -> Result<bool, String> {
     Ok(cnt > 0)
 }
 
+/// Denetim tablosunu ilk kullanımda oluşturur. Aktarım kaydı, Mikro'nun
+/// tablolarını değiştiren her satırın izini SQL Server'da kalıcı tutar.
+pub async fn ensure_audit_log_table(client: &mut SqlClient) -> Result<(), String> {
+    const SQL: &str = "
+        IF OBJECT_ID(N'dbo.CARI_AKTARIM_LOG', N'U') IS NULL
+        BEGIN
+          CREATE TABLE dbo.CARI_AKTARIM_LOG (
+            log_id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+            log_date datetime2(0) NOT NULL CONSTRAINT DF_CARI_AKTARIM_LOG_date DEFAULT SYSDATETIME(),
+            client_machine nvarchar(128) NOT NULL,
+            client_user nvarchar(256) NOT NULL,
+            sql_login nvarchar(256) NOT NULL CONSTRAINT DF_CARI_AKTARIM_LOG_login DEFAULT SUSER_SNAME(),
+            eski_cari_kod nvarchar(255) NOT NULL,
+            yeni_cari_kod nvarchar(255) NOT NULL,
+            cari_tipi int NOT NULL,
+            eski_kart_silinsin bit NOT NULL,
+            result nvarchar(16) NOT NULL,
+            message nvarchar(max) NULL
+          );
+        END";
+    exec_simple(client, SQL)
+        .await
+        .map_err(|e| format!("Denetim tablosu oluşturulamadı: {e}"))
+}
+
+pub async fn ensure_trigger_guard_table(client: &mut SqlClient) -> Result<(), String> {
+    const SQL: &str = "
+        IF OBJECT_ID(N'dbo.CARI_AKTARIM_TRIGGER_GUARD', N'U') IS NULL
+        BEGIN
+          CREATE TABLE dbo.CARI_AKTARIM_TRIGGER_GUARD (
+            guard_id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+            trigger_name nvarchar(260) NOT NULL,
+            table_name nvarchar(260) NOT NULL,
+            client_machine nvarchar(128) NOT NULL,
+            client_user nvarchar(256) NOT NULL,
+            disabled_at datetime2(0) NOT NULL CONSTRAINT DF_CARI_AKTARIM_TRIGGER_GUARD_disabled DEFAULT SYSDATETIME(),
+            restored_at datetime2(0) NULL,
+            restore_note nvarchar(1000) NULL
+          );
+        END";
+    exec_simple(client, SQL)
+        .await
+        .map_err(|e| format!("Trigger koruma tablosu oluşturulamadı: {e}"))
+}
+
+pub async fn trigger_is_disabled(client: &mut SqlClient, trigger: &str) -> Result<bool, String> {
+    let rows = client
+        .query(
+            "SELECT is_disabled FROM sys.triggers WHERE object_id = OBJECT_ID(@P1)",
+            &[&trigger],
+        )
+        .await
+        .map_err(|e| format!("Trigger durumu okunamadı: {e}"))?
+        .into_first_result()
+        .await
+        .map_err(|e| format!("Trigger durumu sonucu okunamadı: {e}"))?;
+    rows.into_iter()
+        .next()
+        .and_then(|r| r.get::<bool, _>(0))
+        .ok_or_else(|| format!("Trigger bulunamadı: {trigger}"))
+}
+
+pub async fn register_trigger_guard(
+    client: &mut SqlClient,
+    trigger: &str,
+    table: &str,
+    machine: &str,
+    user: &str,
+) -> Result<i64, String> {
+    let rows = client
+        .query(
+            "INSERT INTO dbo.CARI_AKTARIM_TRIGGER_GUARD \
+             (trigger_name, table_name, client_machine, client_user) \
+             OUTPUT INSERTED.guard_id VALUES (@P1, @P2, @P3, @P4)",
+            &[&trigger, &table, &machine, &user],
+        )
+        .await
+        .map_err(|e| format!("Trigger koruma kaydı oluşturulamadı: {e}"))?
+        .into_first_result()
+        .await
+        .map_err(|e| format!("Trigger koruma kaydı okunamadı: {e}"))?;
+    rows.into_iter()
+        .next()
+        .and_then(|r| r.get::<i64, _>(0))
+        .ok_or("Trigger koruma kaydı kimliği alınamadı.".into())
+}
+
+pub async fn resolve_trigger_guard(
+    client: &mut SqlClient,
+    guard_id: i64,
+    note: &str,
+) -> Result<(), String> {
+    client
+        .execute(
+            "UPDATE dbo.CARI_AKTARIM_TRIGGER_GUARD \
+             SET restored_at = SYSDATETIME(), restore_note = @P1 WHERE guard_id = @P2",
+            &[&note, &guard_id],
+        )
+        .await
+        .map_err(|e| format!("Trigger koruma kaydı kapatılamadı: {e}"))?;
+    Ok(())
+}
+
+pub async fn pending_trigger_guard(
+    client: &mut SqlClient,
+    trigger: &str,
+    table: &str,
+) -> Result<Option<i64>, String> {
+    let rows = client
+        .query(
+            "SELECT TOP 1 guard_id FROM dbo.CARI_AKTARIM_TRIGGER_GUARD \
+             WHERE trigger_name = @P1 AND table_name = @P2 AND restored_at IS NULL \
+             ORDER BY guard_id DESC",
+            &[&trigger, &table],
+        )
+        .await
+        .map_err(|e| format!("Bekleyen trigger koruma kaydı okunamadı: {e}"))?
+        .into_first_result()
+        .await
+        .map_err(|e| format!("Bekleyen trigger koruma sonucu okunamadı: {e}"))?;
+    Ok(rows.into_iter().next().and_then(|r| r.get::<i64, _>(0)))
+}
+
+/// Başarılı ve başarısız her satırı transaction sonrasında kaydeder.
+pub async fn write_audit_log(client: &mut SqlClient, entry: AuditEntry<'_>) -> Result<(), String> {
+    let sil: i32 = i32::from(entry.sil);
+    client
+        .execute(
+            "INSERT INTO dbo.CARI_AKTARIM_LOG \
+             (client_machine, client_user, eski_cari_kod, yeni_cari_kod, cari_tipi, eski_kart_silinsin, result, message) \
+             VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8)",
+            &[
+                &entry.client_machine,
+                &entry.client_user,
+                &entry.eski,
+                &entry.yeni,
+                &entry.cari_tipi,
+                &sil,
+                &entry.result,
+                &entry.message,
+            ],
+        )
+        .await
+        .map_err(|e| format!("Denetim kaydı yazılamadı: {e}"))?;
+    Ok(())
+}
+
 /// SQL Server'ın GÖRDÜĞÜ klasöre, aktarım öncesi COPY_ONLY tam yedek alır.
 /// COPY_ONLY mevcut diferansiyel/log yedekleme zincirini etkilemez.
 pub async fn backup_database(
@@ -450,6 +609,8 @@ pub async fn transfer_one(
     cari_tipi: i32,
     user_id: i32,
     son_deg_guncelle: bool,
+    client_machine: &str,
+    client_user: &str,
 ) -> Result<String, String> {
     let eski = row.eski.trim();
     let yeni = row.yeni.trim();
@@ -478,6 +639,28 @@ pub async fn transfer_one(
 
     match result {
         Ok(msg) => {
+            // Başarılı aktarım ve denetim kaydı aynı transaction içinde
+            // kalır; log yazılamazsa aktarım da geri alınır.
+            if let Err(audit_error) = write_audit_log(
+                client,
+                AuditEntry {
+                    client_machine,
+                    client_user,
+                    eski,
+                    yeni,
+                    cari_tipi,
+                    sil: row.sil,
+                    result: "OK",
+                    message: &msg,
+                },
+            )
+            .await
+            {
+                let _ = exec_simple(client, "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION").await;
+                return Err(format!(
+                    "Aktarım denetim kaydı yazılamadığı için geri alındı: {audit_error}"
+                ));
+            }
             exec_simple(client, "COMMIT TRANSACTION")
                 .await
                 .map_err(|e| format!("COMMIT başarısız: {e}"))?;
