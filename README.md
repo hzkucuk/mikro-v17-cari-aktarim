@@ -9,11 +9,13 @@ ve iş bittiğinde tekrar açar.
 - Windows 10/11
 - Tauri 2.11 (proje Tauri v1 kullanmaz)
 - Rust (MSVC toolchain): <https://rustup.rs>
+- Node.js 22 LTS ve npm (SvelteKit arayüzünü derlemek için)
 - WebView2 Runtime (Windows 11'de yerleşiktir)
 - Tauri CLI: `cargo install tauri-cli --version "^2" --locked`
 - SQL Server'a erişim ve trigger'ı kapatıp açma yetkisi
 
-Node/npm gerekmez; arayüz `dist/` altında hazır statik dosyadır.
+Arayüz SvelteKit ile `frontend/` altında tutulur. Tauri derlemesi öncesinde
+`npm --prefix frontend run build` otomatik çalışır.
 
 ## Otomatik güncelleme
 

@@ -4,8 +4,10 @@
   "version": "0.1.6",
   "identifier": "com.hzkucuk.mikro.cariaktarim",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": null
+    "beforeDevCommand": "npm --prefix frontend run dev -- --host 127.0.0.1",
+    "beforeBuildCommand": "npm --prefix frontend run build",
+    "frontendDist": "../frontend/build",
+    "devUrl": "http://localhost:5173"
   },
   "app": {
     "withGlobalTauri": true,
