@@ -456,9 +456,11 @@ async function checkForUpdate(interactive = true) {
   const button = $("btnUpdate");
   if (interactive) button.disabled = true;
   try {
-    // Updater plug-in'in Tauri 2 IPC komutu; paket ve imza doğrulaması Rust
-    // tarafında yapılır. İmzalanmamış bir paket asla kurulmaz.
-    const update = await invoke("plugin:updater|check", {});
+    // Tauri'nin updater API'si indirme için gerekli ilerleme kanalını kendi
+    // oluşturur; paket ve imza doğrulaması Rust tarafında yapılır.
+    const updater = window.__TAURI__.updater;
+    if (!updater) throw new Error("Otomatik güncelleme modülü yüklenemedi.");
+    const update = await updater.check();
     if (!update) {
       if (interactive) await showModal("Güncelleme", "Uygulama güncel.", { kind: "success" });
       return;
@@ -472,8 +474,18 @@ async function checkForUpdate(interactive = true) {
     );
     if (!install) return;
 
+    let received = 0;
+    let total = 0;
     button.textContent = "Güncelleme indiriliyor…";
-    await invoke("plugin:updater|download_and_install", { rid: update.rid });
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started") total = event.data.contentLength || 0;
+      if (event.event === "Progress") {
+        received += event.data.chunkLength;
+        const suffix = total ? ` (%${Math.round((received / total) * 100)})` : "";
+        button.textContent = "Güncelleme indiriliyor…" + suffix;
+      }
+      if (event.event === "Finished") button.textContent = "Güncelleme kuruluyor…";
+    });
   } catch (e) {
     // İlk yayınlarda latest.json henüz oluşmamış olabilir; otomatik denetim
     // kullanıcıyı rahatsız etmez, elle denetimde hata açıkça gösterilir.
