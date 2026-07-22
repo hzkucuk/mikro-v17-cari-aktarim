@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mikro Cari Kartı Aktarma</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+
+    <header class="titlebar">
+      <h1>Cari Kartı Aktarma <span class="modcode">098492</span></h1>
+      <div class="subtitle">Mikro V17 · Trigger Yönetimli</div>
+    </header>
+
+    <div class="warnband">
+      ⚠ ÖNCE YEDEK ALIN — Aktarım geri alınamaz. Aktarım sırasında Mikro'yu kapatın.
+    </div>
+
+    <!-- ================= Bağlantı / Ayarlar ================= -->
+    <section class="panel">
+      <div class="panel-head">Bağlantı Ayarları</div>
+      <div class="panel-body grid-form">
+
+        <label for="server">Sunucu</label>
+        <input id="server" type="text" value="10.0.0.10" spellcheck="false" />
+
+        <label for="database">Veritabanı</label>
+        <input id="database" type="text" value="MikroDesktop_BEDIR_2017" spellcheck="false" />
+
+        <label>Kimlik Doğrulama</label>
+        <div class="radios">
+          <label class="inline"><input type="radio" name="auth" value="windows" checked /> Windows Integrated</label>
+          <label class="inline"><input type="radio" name="auth" value="sql" /> SQL Server Auth</label>
+        </div>
+
+        <label for="username" class="sqlonly">Kullanıcı</label>
+        <input id="username" type="text" class="sqlonly" spellcheck="false" autocomplete="off" />
+
+        <label for="password" class="sqlonly">Şifre</label>
+        <input id="password" type="password" class="sqlonly" autocomplete="off" />
+
+        <label for="trigger">Trigger</label>
+        <input id="trigger" type="text" value="dbo.tr_Siparis_ForinsertUpdate" spellcheck="false" />
+
+        <label for="triggerTable">Trigger'ın Tablosu</label>
+        <input id="triggerTable" type="text" value="dbo.SIPARISLER" spellcheck="false" />
+
+        <label for="cariTipi">Cari Tipi</label>
+        <select id="cariTipi">
+          <option value="0" selected>0 — Cari Hesap (müşteri/tedarikçi)</option>
+          <option value="1">1 — Satıcı / Temsilci</option>
+          <option value="2">2 — Banka Hesabı</option>
+          <option value="3">3 — Hizmet</option>
+          <option value="4">4 — Kasa</option>
+          <option value="5">5 — Masraf Merkezi / Gider</option>
+          <option value="7">7 — Personel (bordro)</option>
+          <option value="8">8 — Demirbaş</option>
+          <option value="9">9 — EXIM (ithalat/ihracat)</option>
+        </select>
+
+        <label for="userId">Aktif User ID</label>
+        <input id="userId" type="number" value="1" min="0" />
+
+        <label>Seçenekler</label>
+        <div class="radios">
+          <label class="inline" title="İşaretlenirse evrakların lastup_date/lastup_user alanları aktarım anıyla damgalanır.">
+            <input type="checkbox" id="sonDeg" /> Son değişiklik bilgilerini güncelle
+          </label>
+        </div>
+
+      </div>
+
+      <div class="panel-actions">
+        <button id="btnTest" class="btn btn-blue">Bağlantıyı Test Et</button>
+        <button id="btnTrigger" class="btn btn-gray">Trigger Durumu</button>
+        <button id="btnEnable" class="btn btn-amber" title="Aktarım yarıda kaldıysa trigger'ı elle geri açar">Trigger'ı Geri Aç</button>
+        <span id="connState" class="conn-state">Bağlantı test edilmedi</span>
+      </div>
+    </section>
+
+    <!-- ================= Aktarım Listesi ================= -->
+    <section class="panel">
+      <div class="panel-head">
+        Aktarılacak Cari Kartları
+        <div class="head-actions">
+          <button id="btnAddRow" class="btn btn-sm">+ Satır</button>
+          <button id="btnClear" class="btn btn-sm">Temizle</button>
+        </div>
+      </div>
+
+      <table class="mikro-grid">
+        <thead>
+          <tr>
+            <th class="c-no">#</th>
+            <th class="c-kod">Eski Cari Kodu</th>
+            <th class="c-kod">Yeni Cari Kodu</th>
+            <th class="c-sil">Eski Kart<br />Silinsin</th>
+            <th class="c-durum">Durum</th>
+            <th class="c-del"></th>
+          </tr>
+        </thead>
+        <tbody id="gridBody"></tbody>
+      </table>
+
+      <div class="progress-wrap">
+        <div class="progress"><div id="progressBar" class="progress-bar"></div></div>
+        <span id="progressText">Hazır</span>
+      </div>
+
+      <div class="panel-actions">
+        <button id="btnRun" class="btn btn-green" disabled>Aktarımı Başlat</button>
+        <button id="btnCancel" class="btn btn-red" disabled>İptal</button>
+      </div>
+    </section>
+
+    <!-- ================= Log ================= -->
+    <section class="panel">
+      <div class="panel-head">
+        İşlem Günlüğü
+        <div class="head-actions">
+          <button id="btnCopyLog" class="btn btn-sm">Kopyala</button>
+          <button id="btnClearLog" class="btn btn-sm">Temizle</button>
+        </div>
+      </div>
+      <div id="log" class="log"></div>
+    </section>
+
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-head" id="modalHead">Bilgi</div>
+      <pre class="modal-body" id="modalBody"></pre>
+      <div class="modal-actions" id="modalActions"></div>
+    </div>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>

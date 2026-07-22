@@ -1,0 +1,9 @@
+{
+  "name": "mikro-v17-cari-aktarim",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mikro V17 cari kartı aktarımı için Tauri masaüstü uygulaması",
+  "scripts": {
+    "tauri": "cargo tauri"
+  }
+}

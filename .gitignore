@@ -1,0 +1,10 @@
+# Rust
+src-tauri/target/
+src-tauri/gen/
+
+# Local/editor files
+.DS_Store
+*.swp
+
+# Generated Python bytecode
+tools/__pycache__/
