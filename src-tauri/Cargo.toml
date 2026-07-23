@@ -1,6 +1,6 @@
 [package]
 name = "cari-aktarim"
-version = "0.1.8"
+version = "0.1.9"
 description = "Mikro V17 Cari Kartı Aktarma — Trigger Yönetimli"
 authors = ["hzkucuk"]
 edition = "2021"
@@ -26,7 +26,11 @@ serde_json = "1"
 #   - native-tls   -> Windows'ta SChannel kullanır; SQL Server'ın self-signed
 #                     sertifikalarıyla rustls'e göre çok daha uyumlu.
 # sql-browser-tokio, "SUNUCU\INSTANCE" adlandırılmış örnek desteği sağlar.
-tiberius = { version = "0.12", features = ["chrono", "sql-browser-tokio"] }
+# TLS backend olarak rustls kullanıyoruz. Varsayılan native-tls, macOS'ta
+# Secure Transport'a düşüyor ve SQL Server'ın TDS-içi TLS handshake'iyle
+# "connection closed" hatası veriyor. rustls çok daha uyumlu ve platformdan
+# bağımsız. winauth (Windows Integrated Auth) ve tds73 (datetime2 vb.) korunur.
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "chrono", "winauth", "sql-browser-tokio", "rustls"] }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }

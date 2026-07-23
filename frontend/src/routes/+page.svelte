@@ -20,10 +20,10 @@
   let csvInput: HTMLInputElement;
   let cariTipi = $state(0), userId = $state(1), sonDegGuncelle = $state(false);
   let previewSql = $state<string | null>(null), previewBusy = $state(false);
-  let appVersion = $state('v0.1.8');
-  // İlk değerler panel içeriklerinin tamamını (özellikle çoklu trigger'ı)
-  // splitter altında kesmeden gösterecek şekilde seçildi.
-  let panelHeights = $state([390, 270]);
+  let appVersion = $state('v0.1.9');
+  // [bağlantı paneli yüksekliği, günlük şeridi yüksekliği].
+  // Aradaki aktarım tablosu (grid) 1fr ile kalan tüm alanı alır → en geniş bölüm.
+  let panelHeights = $state([300, 150]);
   const log = (m: string) => { logs = [...logs, `${new Date().toLocaleTimeString('tr-TR')}  ${m}`]; };
   const reset = () => { connectionOk = false; backupOk = false; };
   const cleanTriggers = () => triggers.filter((t) => t.name.trim() || t.table.trim());
@@ -34,10 +34,10 @@
     let unlistenLog: (() => void) | undefined;
     let unlistenProgress: (() => void) | undefined;
     const fitPanels = () => {
-      // 1920 × 1080 ekran için: başlık/uyarıdan sonra üç panel de görünür
-      // kalır. Daha kısa ekranlarda kendi içlerinde kaydırılabilirler.
-      const workspaceHeight = Math.max(720, window.innerHeight - 104);
-      panelHeights = [Math.min(350, Math.max(290, Math.round(workspaceHeight * 0.33))), Math.min(285, Math.max(230, Math.round(workspaceHeight * 0.27)))];
+      // Bağlantı paneli içeriğe göre kompakt; günlük altta ince bir şerit.
+      // Aradaki aktarım tablosu (grid) kalan alanı alır → en geniş bölüm.
+      const h = Math.max(560, window.innerHeight - 100);
+      panelHeights = [Math.min(320, Math.max(240, Math.round(h * 0.28))), Math.min(190, Math.max(120, Math.round(h * 0.15)))];
     };
     fitPanels(); window.addEventListener('resize', fitPanels);
     void getVersion().then((version) => appVersion = `v${version}`).catch(() => undefined);
@@ -127,8 +127,10 @@
     } finally { updateBusy = false; }
   }
   function resizePanel(index: number, event: PointerEvent) {
-    const startY = event.clientY, start = panelHeights[index], min = index === 0 ? 280 : 220;
-    const move = (e: PointerEvent) => { panelHeights[index] = Math.max(min, start + e.clientY - startY); };
+    const startY = event.clientY, start = panelHeights[index];
+    const min = index === 0 ? 160 : 80;
+    const dir = index === 0 ? 1 : -1; // günlük şeridi (alt): yukarı sürükleyince büyür
+    const move = (e: PointerEvent) => { panelHeights[index] = Math.max(min, start + dir * (e.clientY - startY)); };
     const end = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end);
   }
@@ -138,10 +140,11 @@
 <main>
   <header><div><h1>Cari Kartı Aktarma <small>098492</small></h1><p>Mikro V17 · Trigger Yönetimli · <span class="version">{appVersion}</span></p></div></header>
   <div class="warning">⚠ ÖNCE YEDEK ALIN — Aktarım geri alınamaz. Aktarım sırasında Mikro’yu kapatın.</div>
-  <div class="workspace" style={`grid-template-rows: ${panelHeights[0]}px 8px ${panelHeights[1]}px 8px minmax(180px, 1fr)`}>
+  <div class="workspace" style={`grid-template-rows: ${panelHeights[0]}px 9px minmax(200px, 1fr) 9px ${panelHeights[1]}px`}>
   <section class="connection"><h2>Bağlantı ayarları</h2><div class="form">
     <label>Sunucu <input bind:value={cfg.server} oninput={reset} /></label><label>Veritabanı <input bind:value={cfg.database} oninput={reset} /></label>
-    <label class="auth-field">Kimlik doğrulama <span><select bind:value={cfg.auth} onchange={reset}><option value="windows">Windows Integrated</option><option value="sql">SQL Server Auth</option></select>{#if cfg.auth === 'sql'} <input placeholder="Kullanıcı" bind:value={cfg.username} /><input type="password" placeholder="Şifre" bind:value={cfg.password} />{/if}</span></label>
+    <label>Kimlik doğrulama <select bind:value={cfg.auth} onchange={reset}><option value="windows">Windows Integrated</option><option value="sql">SQL Server Auth</option></select></label>
+    {#if cfg.auth === 'sql'}<label>Kullanıcı <input bind:value={cfg.username} /></label><label>Şifre <input type="password" bind:value={cfg.password} /></label>{/if}
     <label class="backup-field">Yedek klasörü <span class="picker"><input bind:value={backupDirectory} oninput={reset} /><button onclick={chooseFolder}>Seç…</button></span></label>
   </div><div class="triggers"><b>Yönetilecek trigger’lar</b>{#each triggers as trigger}<div><input placeholder="dbo.trigger" bind:value={trigger.name} /><input placeholder="dbo.TABLO" bind:value={trigger.table} /><button onclick={() => triggers = triggers.filter((x) => x !== trigger)}>×</button></div>{/each}<button onclick={() => triggers = [...triggers, { name: '', table: '' }]}>+ Trigger ekle</button></div><details><summary>Gelişmiş ayarlar</summary><div class="advanced"><label class="cari-tipi">Cari tipi <select bind:value={cariTipi}><option value={0}>0 — Cari Hesap (müşteri/tedarikçi)</option><option value={1}>1 — Satıcı / Temsilci</option><option value={2}>2 — Banka Hesabı</option><option value={3}>3 — Hizmet</option><option value={4}>4 — Kasa</option><option value={5}>5 — Masraf Merkezi / Gider</option><option value={7}>7 — Personel (bordro)</option><option value={8}>8 — Demirbaş</option><option value={9}>9 — EXIM (ithalat/ihracat)</option></select></label><label>Aktif User ID <input type="number" min="0" bind:value={userId} /></label><label><input type="checkbox" bind:checked={sonDegGuncelle} /> Son değişiklik bilgilerini güncelle</label></div></details>
   <footer><button class="primary" onclick={testConnection} disabled={running}>Bağlantıyı Test Et</button><button class="danger" onclick={backup} disabled={!connectionOk || running}>Önce Yedek Al</button><button class="secondary" onclick={() => update(true)} disabled={running || updateBusy}>{updateBusy ? 'Güncelleme Denetleniyor…' : 'Güncelleme Denetle'}</button><button onclick={triggerStatus} disabled={running}>Trigger Durumu</button><button class="outline" onclick={enableTriggers} disabled={running}>Trigger’ı Geri Aç</button><span>{info}</span></footer></section>
@@ -232,8 +235,6 @@
   .form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; align-items:start }
   .form label, .triggers { display:grid; gap:6px; font-weight:600; font-size:12px; color:#475569 }
   .picker, .triggers>div { display:flex; gap:6px }
-  .auth-field span { display:flex; gap:6px; align-items:center; flex-wrap:wrap }
-  .auth-field select { flex:1 1 180px }
 
   input, select {
     width:100%; min-height:34px; padding:6px 10px;
@@ -339,11 +340,11 @@
   .progress span { display:block; height:100%; background:#0a5cff; border-radius:999px; transition:width .2s }
   .progress-text { margin-top:6px; font-size:11.5px; color:#6b7280 }
 
-  /* Günlük — koyu konsol */
-  .log { padding-bottom:0 }
+  /* Günlük — koyu konsol; paneli tümüyle doldurur (altta beyaz boşluk kalmaz) */
+  .log { padding-bottom:0; display:flex; flex-direction:column }
   .log pre {
-    margin:0 clamp(-24px,-2.4vw,-14px); padding:12px clamp(14px,2.4vw,24px);
-    min-height:180px; background:#1e293b; color:#cbd5e1;
+    flex:1; margin:0 clamp(-24px,-2.4vw,-14px); padding:12px clamp(14px,2.4vw,24px);
+    min-height:140px; background:#1e293b; color:#cbd5e1;
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.6;
     white-space:pre-wrap; word-break:break-word;
   }
@@ -351,13 +352,11 @@
   /* Orta genişlik (tablet / dar pencere): bağlantı formu iki sütun */
   @media(min-width:701px) and (max-width:1100px){
     .connection .form { grid-template-columns:1fr 1fr; gap:10px 14px }
-    .connection .backup-field { grid-column:span 2 }
   }
 
   /* Geniş ekran: bağlantı formu üç sütun, kompakt satır yükseklikleri */
   @media(min-width:1101px){
     .connection .form { grid-template-columns:1.15fr 1.15fr 1.1fr; gap:10px 14px }
-    .connection .backup-field { grid-column:span 2 }
     .connection input, .connection select { min-height:32px; padding:5px 9px }
     .connection .triggers { margin-top:12px; gap:5px }
     .connection details { margin-top:10px }
