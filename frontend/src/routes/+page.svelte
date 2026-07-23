@@ -16,6 +16,7 @@
   let progress = $state({ done: 0, total: 0 });
   let csvInput: HTMLInputElement;
   let cariTipi = $state(0), userId = $state(1), sonDegGuncelle = $state(false);
+  let previewSql = $state<string | null>(null), previewBusy = $state(false);
   let appVersion = $state('v0.1.8');
   // İlk değerler panel içeriklerinin tamamını (özellikle çoklu trigger'ı)
   // splitter altında kesmeden gösterecek şekilde seçildi.
@@ -59,15 +60,32 @@
     try { info = 'Yedek alınıyor…'; const r = await invoke<{ message: string }>('backup_database', { cfg, backupDirectory }); backupOk = true; info = 'Yedek hazır — aktarım yapılabilir'; log(r.message); }
     catch (e) { backupOk = false; info = `Yedek hatası: ${e}`; log(info); }
   }
-  async function transfer() {
+  // Aktarım için ortak doğrulama; geçerliyse temizlenmiş satır/trigger döner.
+  function validateForTransfer() {
     const activeRows = cleanRows(), activeTriggers = cleanTriggers();
-    if (!activeRows.length || activeRows.some((r) => !r.eski || !r.yeni)) return log('Eski ve yeni kodları doldurun.');
-    if (activeTriggers.some((t) => !t.name || !t.table)) return log('Her trigger için ad ve tablo girin.');
-    if (!confirm(`${activeRows.length} satır aktarılacak. Yedek alındı mı?`)) return;
-    running = true; progress = { done: 0, total: activeRows.length }; rows = rows.map((r) => ({ ...r, status: '', message: '' }));
-    try { const s = await invoke<{ total: number; ok: number; failed: number; triggerMessage: string; triggerRestored: boolean; errors: string[] }>('run_transfer', { cfg, triggers: activeTriggers, rows: activeRows, cariTipi, userId, sonDegGuncelle }); const message = `Aktarım bitti: ${s.ok} başarılı, ${s.failed} hatalı.\n${s.triggerMessage}${s.errors.length ? `\n\nHatalar:\n${s.errors.join('\n')}` : ''}`; log(message); alert(message); }
+    if (!activeRows.length || activeRows.some((r) => !r.eski || !r.yeni)) { log('Eski ve yeni kodları doldurun.'); return null; }
+    if (activeTriggers.some((t) => !t.name || !t.table)) { log('Her trigger için ad ve tablo girin.'); return null; }
+    return { activeRows, activeTriggers };
+  }
+  // "Aktarımı Başlat" → önce çalıştırılacak SQL'i backend'den al ve modalda göster.
+  async function openPreview() {
+    const v = validateForTransfer(); if (!v) return;
+    previewBusy = true; info = 'SQL önizlemesi hazırlanıyor…';
+    try {
+      previewSql = await invoke<string>('preview_transfer_sql', { cfg, triggers: v.activeTriggers, rows: v.activeRows, cariTipi, userId, sonDegGuncelle });
+      info = 'SQL önizlemesi hazır — onayınız bekleniyor';
+    } catch (e) { previewSql = null; info = `Önizleme hatası: ${e}`; log(info); alert(info); }
+    finally { previewBusy = false; }
+  }
+  // Modaldaki "Onayla ve Aktar" → gerçek aktarımı çalıştır.
+  async function confirmTransfer() {
+    const v = validateForTransfer(); if (!v) { previewSql = null; return; }
+    previewSql = null;
+    running = true; progress = { done: 0, total: v.activeRows.length }; rows = rows.map((r) => ({ ...r, status: '', message: '' }));
+    try { const s = await invoke<{ total: number; ok: number; failed: number; triggerMessage: string; triggerRestored: boolean; errors: string[] }>('run_transfer', { cfg, triggers: v.activeTriggers, rows: v.activeRows, cariTipi, userId, sonDegGuncelle }); const message = `Aktarım bitti: ${s.ok} başarılı, ${s.failed} hatalı.\n${s.triggerMessage}${s.errors.length ? `\n\nHatalar:\n${s.errors.join('\n')}` : ''}`; log(message); alert(message); }
     catch (e) { log(`Aktarım hatası: ${e}`); } finally { running = false; }
   }
+  async function copyPreview() { try { await navigator.clipboard.writeText(previewSql ?? ''); log('SQL panoya kopyalandı.'); } catch { log('Panoya kopyalanamadı.'); } }
   async function triggerStatus() { try { log(await invoke<string>('trigger_status', { cfg, triggers: cleanTriggers() })); } catch (e) { log(`Trigger durumu alınamadı: ${e}`); } }
   async function enableTriggers() { if (!confirm('Tanımlı trigger’lar etkinleştirilsin mi? Bu yalnızca acil kurtarma içindir.')) return; try { log(await invoke<string>('enable_trigger', { cfg, triggers: cleanTriggers() })); } catch (e) { log(`Trigger etkinleştirilemedi: ${e}`); } }
   async function cancel() { await invoke<void>('cancel_transfer'); log('İptal isteği gönderildi; işlemdeki satır tamamlandıktan sonra durur.'); }
@@ -126,11 +144,27 @@
   </div><div class="triggers"><b>Yönetilecek trigger’lar</b>{#each triggers as trigger}<div><input placeholder="dbo.trigger" bind:value={trigger.name} /><input placeholder="dbo.TABLO" bind:value={trigger.table} /><button onclick={() => triggers = triggers.filter((x) => x !== trigger)}>×</button></div>{/each}<button onclick={() => triggers = [...triggers, { name: '', table: '' }]}>+ Trigger ekle</button></div><details><summary>Gelişmiş ayarlar</summary><div class="advanced"><label>Aktif User ID <input type="number" min="0" bind:value={userId} /></label><label><input type="checkbox" bind:checked={sonDegGuncelle} /> Son değişiklik bilgilerini güncelle</label></div></details>
   <footer><button class="primary" onclick={testConnection} disabled={running}>Bağlantıyı Test Et</button><button class="danger" onclick={backup} disabled={!connectionOk || running}>Önce Yedek Al</button><button class="secondary" onclick={() => update(true)} disabled={running || updateBusy}>{updateBusy ? 'Güncelleme Denetleniyor…' : 'Güncelleme Denetle'}</button><button onclick={triggerStatus} disabled={running}>Trigger Durumu</button><button class="outline" onclick={enableTriggers} disabled={running}>Trigger’ı Geri Aç</button><span>{info}</span></footer></section>
   <div class="splitter" role="separator" aria-label="Bağlantı ve aktarım alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(0, event)}></div>
-  <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><input bind:value={row.eski} /></td><td><input bind:value={row.yeni} /></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}>{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? 'İşleniyor…' : row.message || '—'}</td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={transfer} disabled={!connectionOk || !backupOk || running}>Aktarımı Başlat</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button></footer></section>
+  <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><input bind:value={row.eski} /></td><td><input bind:value={row.yeni} /></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}>{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? 'İşleniyor…' : row.message || '—'}</td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={openPreview} disabled={!connectionOk || !backupOk || running || previewBusy}>{previewBusy ? 'SQL Hazırlanıyor…' : 'Aktarımı Başlat'}</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button></footer></section>
   <div class="splitter" role="separator" aria-label="Aktarım ve günlük alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(1, event)}></div>
   <section class="log"><h2>İşlem günlüğü</h2><div class="section-tools"><button onclick={() => navigator.clipboard.writeText(logs.join('\n'))}>Kopyala</button><button onclick={() => logs = []}>Temizle</button></div><pre>{logs.join('\n')}</pre></section>
   </div>
 </main>
+
+{#if previewSql !== null}
+  <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="SQL önizlemesi">
+    <div class="modal">
+      <div class="modal-head">Çalıştırılacak SQL — Onayınız bekleniyor</div>
+      <div class="modal-note">⚠ Aşağıdaki adımlar aynen çalıştırılacaktır (her satır kendi transaction'ında). Yedek aldığınızdan emin olun. Gerçek yürütme parametreli sorgu kullanır; değerler burada yalnızca okunabilirlik için gömülmüştür.</div>
+      <pre class="modal-sql">{previewSql}</pre>
+      <div class="modal-actions">
+        <button onclick={copyPreview}>Kopyala</button>
+        <span class="spacer"></span>
+        <button class="secondary" onclick={() => previewSql = null}>Vazgeç</button>
+        <button class="success" onclick={confirmTransfer}>Onayla ve Aktar</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   /* ---------------------------------------------------------------
@@ -140,18 +174,18 @@
   :global(*) { box-sizing: border-box }
   :global(html), :global(body) { height:100%; margin:0 }
   :global(body) {
-    background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+    background:#e4e8f0;
     color:#1a1a1a;
     font:13px "Segoe UI",Tahoma,sans-serif;
   }
 
-  main { height:100vh; min-height:720px; display:flex; flex-direction:column; overflow:hidden }
+  main { height:100vh; min-height:0; display:flex; flex-direction:column; overflow:hidden }
 
-  /* Başlık şeridi */
+  /* Başlık şeridi — pencere kenarına dayalı (full-bleed) */
   header {
     display:flex; justify-content:space-between; align-items:center;
-    background:#fff; border:1px solid #000; border-bottom:none;
-    padding:10px clamp(16px,3vw,44px);
+    background:#fff; border-bottom:1px solid #000;
+    padding:10px clamp(14px,2.4vw,24px);
   }
   h1,h2,p { margin:0 }
   h1 { font-size:17px; font-weight:600; color:#1f2a44 }
@@ -166,16 +200,16 @@
   /* Kırmızı yedek uyarı bandı */
   .warning {
     background:#c62828; color:#fff; font-weight:600; letter-spacing:.2px;
-    text-align:center; padding:7px clamp(16px,3vw,44px);
-    border:1px solid #000; border-top:none;
+    text-align:center; padding:7px clamp(14px,2.4vw,24px);
   }
 
-  .workspace { flex:1; min-height:0; display:grid; overflow:auto; padding:12px clamp(10px,2vw,24px) 28px }
+  /* İçerik alanı — pencereyi tümüyle doldurur, kenarda boşluk yok */
+  .workspace { flex:1; min-height:0; display:grid; overflow:auto; background:#c8d0de }
 
-  /* Paneller: beyaz gövde, siyah çerçeve */
+  /* Paneller: beyaz gövde, üst/alt siyah çerçeve (yanlar pencere kenarında) */
   section {
     min-width:0; min-height:0; overflow:auto; position:relative;
-    background:#fff; border:1px solid #000;
+    background:#fff; border-top:1px solid #000;
     padding:0 clamp(14px,2.4vw,24px) 14px;
   }
 
@@ -282,8 +316,14 @@
     white-space:pre-wrap; word-break:break-word;
   }
 
-  /* Kompakt bağlantı paneli (geniş ekran) */
-  @media(min-width:901px){
+  /* Orta genişlik (tablet / dar pencere): bağlantı formu iki sütun */
+  @media(min-width:701px) and (max-width:1100px){
+    .connection .form { grid-template-columns:1fr 1fr; gap:8px 12px }
+    .connection .backup-field { grid-column:span 2 }
+  }
+
+  /* Geniş ekran: bağlantı formu üç sütun, kompakt satır yükseklikleri */
+  @media(min-width:1101px){
     .connection .form { grid-template-columns:1.15fr 1.15fr 1.1fr; gap:8px 12px }
     .connection .backup-field { grid-column:span 2 }
     .connection input, .connection select { min-height:30px; padding:4px 7px }
@@ -292,14 +332,45 @@
     .connection .advanced { padding:5px 0 }
   }
 
-  /* Dar ekran: paneller alt alta, ayraçlar gizli */
-  @media(max-width:900px){
+  /* SQL önizleme modalı */
+  .modal-backdrop {
+    position:fixed; inset:0; z-index:100; padding:24px;
+    background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center;
+  }
+  .modal {
+    background:#fff; border:1px solid #000; width:min(860px,100%);
+    max-height:86vh; display:flex; flex-direction:column;
+  }
+  .modal-head {
+    background:#3c4a5e; color:#fff; font-weight:600; font-size:12.5px;
+    padding:8px 14px; border-bottom:1px solid #000;
+  }
+  .modal-note {
+    background:#fff3cd; color:#7a5b00; font-size:11.5px; line-height:1.5;
+    padding:8px 14px; border-bottom:1px solid #e6d9a8;
+  }
+  .modal-sql {
+    margin:0; padding:12px 14px; overflow:auto; flex:1;
+    background:#14181f; color:#d7dce4;
+    font-family:Consolas,"Courier New",monospace; font-size:12px; line-height:1.5;
+    white-space:pre; tab-size:4;
+  }
+  .modal-actions {
+    display:flex; gap:8px; align-items:center; padding:10px 14px;
+    border-top:1px solid #d0d4dc; background:#f7f8fa;
+  }
+  .modal-actions .spacer { flex:1 }
+
+  /* Dar ekran: paneller alt alta, ayraçlar gizli, tek sütun */
+  @media(max-width:700px){
     main { height:auto; min-height:100vh; overflow:visible }
     .workspace { display:block!important; overflow:visible }
     .splitter { display:none }
-    .connection, .transfer, .log { overflow:visible; margin-bottom:12px }
+    .connection, .transfer, .log { overflow:visible; margin-bottom:8px }
     .form { grid-template-columns:1fr }
-    header { align-items:flex-start; gap:10px; flex-direction:column }
+    header { align-items:flex-start; gap:8px; flex-direction:column }
     .advanced { align-items:flex-start; flex-direction:column }
+    footer { position:static; box-shadow:none }
+    .picker, .triggers>div { flex-wrap:wrap }
   }
 </style>

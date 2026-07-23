@@ -346,6 +346,37 @@ async fn enable_trigger(cfg: DbConfig, triggers: Vec<TriggerCfg>) -> Result<Stri
     Ok(messages.join("\n"))
 }
 
+/// Aktarım öncesi onay için, çalıştırılacak SQL'in birebir önizlemesini üretir.
+/// Kopyalama (sil=false) satırı varsa gerçek kolon listesini canlı bağlantıdan
+/// çözer; yalnızca yeniden adlandırma varsa bağlantı gerekmez.
+#[tauri::command]
+async fn preview_transfer_sql(
+    cfg: DbConfig,
+    triggers: Vec<TriggerCfg>,
+    rows: Vec<TransferRow>,
+    cari_tipi: i32,
+    user_id: i32,
+    son_deg_guncelle: bool,
+) -> Result<String, String> {
+    if rows.is_empty() {
+        return Err("Önizlenecek satır yok.".into());
+    }
+    let needs_columns = rows.iter().any(|r| !r.sil);
+    let columns = if needs_columns {
+        Some(db::fetch_cari_columns(&cfg).await?)
+    } else {
+        None
+    };
+    db::build_sql_preview(
+        &rows,
+        &triggers,
+        cari_tipi,
+        user_id,
+        son_deg_guncelle,
+        columns.as_deref(),
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -359,6 +390,7 @@ pub fn run() {
             test_connection,
             backup_database,
             trigger_status,
+            preview_transfer_sql,
             run_transfer,
             cancel_transfer,
             enable_trigger,

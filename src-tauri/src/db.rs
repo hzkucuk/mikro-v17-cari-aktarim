@@ -789,9 +789,173 @@ async fn transfer_one_inner(
     Ok(format!("{step1}, referanslar aktarıldı"))
 }
 
+// ---------------------------------------------------------------------------
+// SQL önizlemesi (aktarım öncesi onay için)
+// ---------------------------------------------------------------------------
+
+/// Bir değeri SQL string literal'ine çevirir: `N'...'`, tek tırnaklar kaçırılır.
+/// Yalnızca önizleme metni içindir; asıl yürütme parametreli sorgu kullanır.
+fn sql_literal(s: &str) -> String {
+    format!("N'{}'", s.replace('\'', "''"))
+}
+
+/// Kopyalama önizlemesi için CARI_HESAPLAR kolonlarını canlı bağlantıdan alır.
+pub async fn fetch_cari_columns(cfg: &DbConfig) -> Result<Vec<String>, String> {
+    let mut client = connect(cfg).await?;
+    cari_columns(&mut client).await
+}
+
+/// Aktarımda ÇALIŞTIRILACAK SQL'in insan-okur önizlemesini üretir. Yürütme
+/// akışıyla birebir aynıdır (trigger disable → satır başına BEGIN/UPDATE|INSERT/
+/// EXEC/COMMIT → trigger enable). Kopyalama (sil=false) satırları için gerçek
+/// kolon listesi `columns` ile verilmelidir; verilmezse yer tutucu yazılır.
+pub fn build_sql_preview(
+    rows: &[TransferRow],
+    triggers: &[TriggerCfg],
+    cari_tipi: i32,
+    user_id: i32,
+    son_deg_guncelle: bool,
+    columns: Option<&[String]>,
+) -> Result<String, String> {
+    let flag: i32 = if son_deg_guncelle { 1 } else { 0 };
+    let sep = "-- ================================================================\n";
+    let mut out = String::new();
+
+    // Trigger'ları yürütmeyle aynı katı doğrulamadan geçir.
+    let mut trig_idents = Vec::new();
+    for t in triggers {
+        if t.name.trim().is_empty() && t.table.trim().is_empty() {
+            continue;
+        }
+        trig_idents.push((
+            validate_qualified_ident(&t.name)?,
+            validate_qualified_ident(&t.table)?,
+        ));
+    }
+
+    out.push_str(sep);
+    out.push_str("-- 1) TRIGGER'LAR DEVRE DIŞI (aktarım başında, tek oturumda)\n");
+    out.push_str(sep);
+    if trig_idents.is_empty() {
+        out.push_str("-- (Trigger yönetimi yok — tanımlı trigger girilmedi)\n");
+    } else {
+        for (n, t) in &trig_idents {
+            out.push_str(&format!("DISABLE TRIGGER {n} ON {t};\n"));
+        }
+    }
+    out.push('\n');
+
+    for (i, row) in rows.iter().enumerate() {
+        let eski = row.eski.trim();
+        let yeni = row.yeni.trim();
+        let mode = if row.sil {
+            "eski kart SİLİNECEK (yeniden adlandırma)"
+        } else {
+            "eski kart KORUNACAK (kopyalama)"
+        };
+        out.push_str(sep);
+        out.push_str(&format!("-- SATIR {}:  {eski}  →  {yeni}   [{mode}]\n", i + 1));
+        out.push_str(sep);
+        out.push_str("BEGIN TRANSACTION;\n");
+
+        if row.sil {
+            out.push_str(&format!(
+                "UPDATE dbo.CARI_HESAPLAR\n    \
+                 SET cari_kod = {}, cari_lastup_date = GETDATE(), cari_lastup_user = {user_id}\n    \
+                 WHERE cari_kod = {};\n",
+                sql_literal(yeni),
+                sql_literal(eski),
+            ));
+        } else {
+            match columns {
+                Some(cols) if !cols.is_empty() => {
+                    let col_list = cols
+                        .iter()
+                        .map(|c| format!("[{c}]"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let select_list = cols
+                        .iter()
+                        .map(|c| {
+                            if c.eq_ignore_ascii_case("cari_kod") {
+                                sql_literal(yeni)
+                            } else {
+                                format!("[{c}]")
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    out.push_str(&format!(
+                        "INSERT INTO dbo.CARI_HESAPLAR ({col_list})\n    \
+                         SELECT {select_list}\n    \
+                         FROM dbo.CARI_HESAPLAR WHERE cari_kod = {};\n",
+                        sql_literal(eski),
+                    ));
+                }
+                _ => {
+                    out.push_str(&format!(
+                        "INSERT INTO dbo.CARI_HESAPLAR ( <identity hariç tüm kolonlar> )\n    \
+                         SELECT < ..., cari_kod = {}, ... >\n    \
+                         FROM dbo.CARI_HESAPLAR WHERE cari_kod = {};\n    \
+                         -- Kolon listesi çalışma anında INFORMATION_SCHEMA'dan çözülür.\n",
+                        sql_literal(yeni),
+                        sql_literal(eski),
+                    ));
+                }
+            }
+        }
+
+        out.push_str(&format!(
+            "EXEC dbo.msp_CariKodunuDegistir\n    \
+             @CariTipi = {cari_tipi},\n    \
+             @EskiCariKodu = {},\n    \
+             @YeniCariKodu = {},\n    \
+             @Kart_aktarim_son_deg_bilgileri_guncelle_fl = {flag};\n",
+            sql_literal(eski),
+            sql_literal(yeni),
+        ));
+        out.push_str("COMMIT TRANSACTION;\n\n");
+    }
+
+    out.push_str(sep);
+    out.push_str("-- 2) TRIGGER'LAR TEKRAR ETKİN (aktarım sonunda, HER KOŞULDA)\n");
+    out.push_str(sep);
+    if trig_idents.is_empty() {
+        out.push_str("-- (Trigger yönetimi yok)\n");
+    } else {
+        for (n, t) in &trig_idents {
+            out.push_str(&format!("ENABLE TRIGGER {n} ON {t};\n"));
+        }
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validate_qualified_ident;
+    use super::{build_sql_preview, validate_qualified_ident, TransferRow, TriggerCfg};
+
+    #[test]
+    fn onizleme_ciktisi() {
+        let rows = vec![
+            TransferRow { eski: "120.1.İNT.HB.1156".into(), yeni: "ESK-120.1.İNT.HB.1156".into(), sil: true },
+            TransferRow { eski: "120.1.O'BRIEN".into(), yeni: "120.1.ARSIV.OBRIEN".into(), sil: false },
+        ];
+        let triggers = vec![TriggerCfg { name: "dbo.tr_Siparis_ForinsertUpdate".into(), table: "dbo.SIPARISLER".into() }];
+        let cols = vec!["cari_Guid".to_string(), "cari_kod".to_string(), "cari_unvan1".to_string()];
+        let sql = build_sql_preview(&rows, &triggers, 0, 1, false, Some(&cols)).unwrap();
+        println!("\n------- ÖNİZLEME BAŞLANGIÇ -------\n{sql}\n------- ÖNİZLEME BİTİŞ -------\n");
+        // Kritik güvenlik: tek tırnak kaçışı (O'BRIEN -> O''BRIEN)
+        assert!(sql.contains("N'120.1.O''BRIEN'"));
+        // Rename UPDATE ve EXEC mevcut
+        assert!(sql.contains("UPDATE dbo.CARI_HESAPLAR"));
+        assert!(sql.contains("EXEC dbo.msp_CariKodunuDegistir"));
+        // Kopyalama INSERT'inde cari_kod yeni koda çevrilmiş
+        assert!(sql.contains("SELECT [cari_Guid], N'120.1.ARSIV.OBRIEN', [cari_unvan1]"));
+        // Trigger disable/enable
+        assert!(sql.contains("DISABLE TRIGGER [dbo].[tr_Siparis_ForinsertUpdate] ON [dbo].[SIPARISLER]"));
+        assert!(sql.contains("ENABLE TRIGGER [dbo].[tr_Siparis_ForinsertUpdate] ON [dbo].[SIPARISLER]"));
+    }
 
     #[test]
     fn kabul_edilen_isimler() {
