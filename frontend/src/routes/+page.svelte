@@ -136,9 +136,35 @@
     return { activeRows, activeTriggers };
   }
   // "Aktarımı Başlat" → önce çalıştırılacak SQL'i backend'den al ve modalda göster.
+  // Aktarım öncesi DB ön kontrolü: eski kod var mı, yeni kod zaten var mı.
+  let validating = $state(false);
+  async function validateRows(silent = false) {
+    const active = cleanRows();
+    if (!active.length) { if (!silent) log('Doğrulanacak satır yok.'); return { ok: false, bad: [] as any[] }; }
+    if (!connectionOk) { if (!silent) { log('Ön kontrol için önce bağlantıyı test edin.'); alert('Ön kontrol için önce "Bağlantıyı Test Et".'); } return { ok: false, bad: [] as any[] }; }
+    validating = true;
+    try {
+      const results = await invoke<{ index: number; ok: boolean; message: string }[]>('validate_rows', { cfg, rows: active });
+      results.forEach((res, i) => { const r = active[i]; if (r) { r.status = res.ok ? 'valid' : 'invalid'; r.message = res.message; } });
+      const bad = results.filter((r) => !r.ok);
+      if (!silent) log(bad.length ? `Ön kontrol: ${bad.length}/${results.length} satırda sorun var.` : `Ön kontrol: ${results.length} satır hazır.`);
+      return { ok: bad.length === 0, bad };
+    } catch (e) { if (!silent) log(`Ön kontrol hatası: ${e}`); return { ok: false, bad: [] as any[] }; }
+    finally { validating = false; }
+  }
+
   async function openPreview() {
     const v = validateForTransfer(); if (!v) return;
-    previewBusy = true; info = 'SQL önizlemesi hazırlanıyor…';
+    previewBusy = true; info = 'Ön kontrol yapılıyor…';
+    // Önce DB ön kontrolü; sorunlu satır varsa aktarımı durdur.
+    const check = await validateRows(true);
+    if (!check.ok) {
+      previewBusy = false;
+      info = `${check.bad.length} satırda sorun var — düzeltin.`;
+      alert('Aktarım durduruldu — sorunlu satırlar:\n' + check.bad.map((r) => `• Satır ${r.index + 1}: ${r.message}`).join('\n'));
+      return;
+    }
+    info = 'SQL önizlemesi hazırlanıyor…';
     try {
       previewSql = await invoke<string>('preview_transfer_sql', { cfg, triggers: v.activeTriggers, rows: v.activeRows, cariTipi, userId, sonDegGuncelle });
       info = 'SQL önizlemesi hazır — onayınız bekleniyor';
@@ -171,10 +197,17 @@
     reader.onload = () => {
       const parsed = parseCsv(String(reader.result).replace(/^\uFEFF/, ''));
       const data = /eski|kaynak/i.test(parsed[0]?.[0] ?? '') || /yeni|hedef/i.test(parsed[0]?.[1] ?? '') ? parsed.slice(1) : parsed;
-      const incomplete = data.find((cells) => (cells[0] || cells[1]) && (!cells[0] || !cells[1]));
-      if (incomplete) return log('CSV’de eski veya yeni cari kodu boş olan bir satır var.');
-      const imported = data.filter((cells) => cells[0] || cells[1]).map((cells) => ({ eski: cells[0], yeni: cells[1], sil: !/^(0|hayır|hayir|false|no|kalsın|kalsin)$/i.test(cells[2] ?? '') }));
-      if (imported.length) { rows = rows.length === 1 && !rows[0].eski && !rows[0].yeni ? imported : [...rows, ...imported]; log(`${imported.length} CSV satırı içe aktarıldı: ${file.name}`); } else log('CSV’de aktarılacak satır bulunamadı.');
+      // Tüm satırları içeri al; eksik kodlu olanları satır bazında işaretle.
+      const imported: Row[] = data.filter((cells) => cells[0] || cells[1]).map((cells) => {
+        const eksik = !cells[0] || !cells[1];
+        return { eski: cells[0] ?? '', yeni: cells[1] ?? '', sil: !/^(0|hayır|hayir|false|no|kalsın|kalsin)$/i.test(cells[2] ?? ''), status: eksik ? 'invalid' : undefined, message: eksik ? 'CSV: eksik kod (eski/yeni zorunlu)' : undefined };
+      });
+      if (!imported.length) { log('CSV’de aktarılacak satır bulunamadı.'); return; }
+      rows = rows.length === 1 && !rows[0].eski && !rows[0].yeni ? imported : [...rows, ...imported];
+      const eksikSayisi = imported.filter((r) => r.status === 'invalid').length;
+      log(`${imported.length} CSV satırı içe aktarıldı${eksikSayisi ? `, ${eksikSayisi} satırda eksik kod` : ''}: ${file.name}`);
+      if (eksikSayisi) alert(`CSV: ${eksikSayisi} satırda eski veya yeni kod boş. Bu satırlar ⚠ ile işaretlendi; düzeltin veya silin.`);
+      if (connectionOk) void validateRows(true); // dolu satırları DB'de doğrula
     }; reader.readAsText(file, 'utf-8'); input.value = '';
   }
   async function update(interactive = true) {
@@ -214,7 +247,7 @@
   </div><div class="triggers"><b>Yönetilecek trigger’lar</b>{#each triggers as trigger}<div><input placeholder="dbo.trigger" bind:value={trigger.name} /><input placeholder="dbo.TABLO" bind:value={trigger.table} /><button onclick={() => triggers = triggers.filter((x) => x !== trigger)}>×</button></div>{/each}<button onclick={() => triggers = [...triggers, { name: '', table: '' }]}>+ Trigger ekle</button></div><details><summary>Gelişmiş ayarlar</summary><div class="advanced"><label class="cari-tipi">Cari tipi <select bind:value={cariTipi}><option value={0}>0 — Cari Hesap (müşteri/tedarikçi)</option><option value={1}>1 — Satıcı / Temsilci</option><option value={2}>2 — Banka Hesabı</option><option value={3}>3 — Hizmet</option><option value={4}>4 — Kasa</option><option value={5}>5 — Masraf Merkezi / Gider</option><option value={7}>7 — Personel (bordro)</option><option value={8}>8 — Demirbaş</option><option value={9}>9 — EXIM (ithalat/ihracat)</option></select></label><label>Aktif User ID <input type="number" min="0" bind:value={userId} /></label><label><input type="checkbox" bind:checked={sonDegGuncelle} /> Son değişiklik bilgilerini güncelle</label></div></details>
   <footer><button class="primary" onclick={testConnection} disabled={running}>Bağlantıyı Test Et</button><button class="danger" onclick={backup} disabled={!connectionOk || running}>Önce Yedek Al</button><button class="secondary" onclick={() => update(true)} disabled={running || updateBusy}>{updateBusy ? 'Güncelleme Denetleniyor…' : 'Güncelleme Denetle'}</button><button onclick={triggerStatus} disabled={running}>Trigger Durumu</button><button class="outline" onclick={enableTriggers} disabled={running}>Trigger’ı Geri Aç</button><label class="remember"><input type="checkbox" bind:checked={rememberPassword} /> Şifreyi hatırla</label><button onclick={saveSettings} title="Tüm ayarları kaydeder. 'Şifreyi hatırla' işaretliyse SQL parolası AES-256 ile şifreli saklanır.">💾 Ayarları Kaydet</button><span>{settingsMsg || info}</span></footer></section>
   <div class="splitter" role="separator" aria-label="Bağlantı ve aktarım alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(0, event)}></div>
-  <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur. Kod hücrelerinin sağındaki <b>…</b> ile cari arayabilirsiniz (Mikro F10). Örnek dosya: <code>ornek-cari-aktarim.csv</code>.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()} title={"CSV / metin dosyası (UTF-8). Sütunlar ; , veya TAB ile ayrılır:\n  1) Eski Cari Kodu  (zorunlu)\n  2) Yeni Cari Kodu  (zorunlu)\n  3) Eski Kart Silinsin  (opsiyonel): 1 veya boş = sil, 0/hayır/false = koru\nBaşlık satırı otomatik atlanır.\nÖrnek satır:  120.1.INT.HB.1156 ; ESK-120.1.INT.HB.1156 ; 1"}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><div class="cell-pick"><input bind:value={row.eski} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'eski')}>…</button></div></td><td><div class="cell-pick"><input bind:value={row.yeni} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'yeni')}>…</button></div></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}>{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? 'İşleniyor…' : row.message || '—'}</td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={openPreview} disabled={!connectionOk || !backupOk || running || previewBusy}>{previewBusy ? 'SQL Hazırlanıyor…' : 'Aktarımı Başlat'}</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button></footer></section>
+  <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur. Kod hücrelerinin sağındaki <b>…</b> ile cari arayabilirsiniz (Mikro F10). Örnek dosya: <code>ornek-cari-aktarim.csv</code>.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()} title={"CSV / metin dosyası (UTF-8). Sütunlar ; , veya TAB ile ayrılır:\n  1) Eski Cari Kodu  (zorunlu)\n  2) Yeni Cari Kodu  (zorunlu)\n  3) Eski Kart Silinsin  (opsiyonel): 1 veya boş = sil, 0/hayır/false = koru\nBaşlık satırı otomatik atlanır.\nÖrnek satır:  120.1.INT.HB.1156 ; ESK-120.1.INT.HB.1156 ; 1"}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button><button onclick={() => validateRows(false)} disabled={validating || !connectionOk} title="Satırları DB'de ön kontrol et: eski kod var mı, yeni kod zaten mevcut mu">{validating ? 'Kontrol…' : '✓ Doğrula'}</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><div class="cell-pick"><input bind:value={row.eski} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'eski')}>…</button></div></td><td><div class="cell-pick"><input bind:value={row.yeni} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'yeni')}>…</button></div></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}><span class="rowstat {row.status ?? ''}">{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? '⏳ İşleniyor…' : row.status === 'valid' ? '✓ Hazır' : row.status === 'invalid' ? `⚠ ${row.message ?? 'Sorun'}` : (row.message || '—')}</span></td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={openPreview} disabled={!connectionOk || !backupOk || running || previewBusy}>{previewBusy ? 'SQL Hazırlanıyor…' : 'Aktarımı Başlat'}</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button></footer></section>
   <div class="splitter" role="separator" aria-label="Aktarım ve günlük alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(1, event)}></div>
   <section class="log"><h2>İşlem günlüğü</h2><div class="section-tools"><button onclick={() => navigator.clipboard.writeText(logs.join('\n'))}>Kopyala</button><button onclick={() => logs = []}>Temizle</button></div><pre>{logs.join('\n')}</pre></section>
   </div>
@@ -495,6 +528,12 @@
     border-left:1px solid #eef1f4;
   }
   .pick-btn:hover:not(:disabled) { background:#eff5ff }
+
+  /* Satır durum göstergesi (Durum sütunu) */
+  .rowstat { font-size:12px; color:#6b7280 }
+  .rowstat.ok, .rowstat.valid { color:#16a34a; font-weight:600 }
+  .rowstat.error, .rowstat.invalid { color:#dc2626; font-weight:600 }
+  .rowstat.running { color:#0a5cff; font-weight:600 }
 
   /* "Şifreyi hatırla" etiketi (footer) */
   .remember { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#475569; font-weight:500 }

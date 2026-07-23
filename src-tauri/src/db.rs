@@ -790,6 +790,76 @@ async fn transfer_one_inner(
 }
 
 // ---------------------------------------------------------------------------
+// Aktarım öncesi satır doğrulama
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowValidation {
+    pub index: usize,
+    pub eski_exists: bool,
+    pub yeni_exists: bool,
+    pub ok: bool,
+    pub message: String,
+}
+
+/// Her satır için ön kontrol: eski kod DB'de var mı, yeni kod zaten mevcut mu.
+/// Aktarımı çalıştırmaz; yalnızca durum döner.
+pub async fn validate_rows(
+    cfg: &DbConfig,
+    rows: &[TransferRow],
+) -> Result<Vec<RowValidation>, String> {
+    let mut client = connect(cfg).await?;
+    let mut out = Vec::with_capacity(rows.len());
+
+    for (index, row) in rows.iter().enumerate() {
+        let eski = row.eski.trim();
+        let yeni = row.yeni.trim();
+        let mut messages: Vec<String> = Vec::new();
+        let mut eski_exists = false;
+        let mut yeni_exists = false;
+
+        if eski.is_empty() || yeni.is_empty() {
+            messages.push("Eski ve yeni kod zorunlu".into());
+        } else if eski == yeni {
+            messages.push("Eski ve yeni kod aynı".into());
+        } else {
+            eski_exists = scalar_count(
+                &mut client,
+                "SELECT COUNT(*) FROM dbo.CARI_HESAPLAR WHERE cari_kod = @P1",
+                eski,
+            )
+            .await?
+                > 0;
+            yeni_exists = scalar_count(
+                &mut client,
+                "SELECT COUNT(*) FROM dbo.CARI_HESAPLAR WHERE cari_kod = @P1",
+                yeni,
+            )
+            .await?
+                > 0;
+            if !eski_exists {
+                messages.push(format!("Eski kod DB'de yok: {eski}"));
+            }
+            if yeni_exists {
+                messages.push(format!("Yeni kod zaten mevcut: {yeni}"));
+            }
+        }
+
+        let ok = messages.is_empty();
+        out.push(RowValidation {
+            index,
+            eski_exists,
+            yeni_exists,
+            ok,
+            message: if ok { "Hazır".into() } else { messages.join(" · ") },
+        });
+    }
+
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
 // F10 cari arama (CARI_HESAPLAR_CHOOSE_2A_1 view'ı)
 // ---------------------------------------------------------------------------
 

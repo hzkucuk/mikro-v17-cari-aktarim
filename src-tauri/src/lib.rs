@@ -378,6 +378,19 @@ async fn preview_transfer_sql(
     )
 }
 
+/// Aktarım öncesi ön kontrol: her satır için eski kod var mı, yeni kod zaten
+/// mevcut mu. Aktarımı çalıştırmaz.
+#[tauri::command]
+async fn validate_rows(
+    cfg: DbConfig,
+    rows: Vec<TransferRow>,
+) -> Result<Vec<db::RowValidation>, String> {
+    if rows.is_empty() {
+        return Ok(vec![]);
+    }
+    db::validate_rows(&cfg, &rows).await
+}
+
 /// F10 cari arama: verilen view'da '*' joker desteğiyle cari_kod araması yapar.
 #[tauri::command]
 async fn search_cari(
@@ -412,6 +425,7 @@ pub fn run() {
             cancel_transfer,
             enable_trigger,
             search_cari,
+            validate_rows,
             settings::save_settings,
             settings::load_settings,
         ])
