@@ -870,6 +870,8 @@ pub struct CariSearchResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<String>>,
     pub truncated: bool,
+    /// Seçilince hücreye yazılacak kod kolonunun indeksi.
+    pub code_index: usize,
 }
 
 /// Mikro tarzı '*' joker karakterini SQL LIKE desenine çevirir.
@@ -934,6 +936,15 @@ pub async fn search_cari(
         return Err(format!("'{view}' bulunamadı veya kolonu yok."));
     }
 
+    // Arama/sıralama/seçim anahtarı: bu CHOOSE view'larında kod kolonu bazen
+    // 'cari_kod', bazen msg_S_XXXX gibi alias'la gelir. 'cari_kod' varsa onu,
+    // yoksa ilk kolonu anahtar kabul ediyoruz (CHOOSE view'larında kod ilk gelir).
+    let code_idx = columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("cari_kod"))
+        .unwrap_or(0);
+    let code_col = columns[code_idx].clone();
+
     // Tüm kolonları sunucu tarafında nvarchar'a çeviriyoruz; böylece türden
     // bağımsız olarak hepsini string okuyabiliriz (tarih, sayı, bit dahil).
     let select_list = columns
@@ -945,13 +956,13 @@ pub async fn search_cari(
     // TOP (limit+1) ile bir fazla çekip kırpılma olup olmadığını anlarız.
     let sql = format!(
         "SELECT TOP ({}) {select_list} FROM {view_ident} \
-         WHERE CONVERT(nvarchar(200), [cari_kod]) LIKE @P1 ORDER BY [cari_kod]",
+         WHERE CONVERT(nvarchar(400), [{code_col}]) LIKE @P1 ORDER BY [{code_col}]",
         limit + 1
     );
     let result_rows = client
         .query(&sql, &[&pattern])
         .await
-        .map_err(|e| format!("Cari arama başarısız: {e}"))?
+        .map_err(|e| format!("Cari arama başarısız (kod kolonu '{code_col}'): {e}"))?
         .into_first_result()
         .await
         .map_err(|e| format!("Arama sonucu okunamadı: {e}"))?;
@@ -971,7 +982,7 @@ pub async fn search_cari(
         rows.truncate(limit as usize);
     }
 
-    Ok(CariSearchResult { columns, rows, truncated })
+    Ok(CariSearchResult { columns, rows, truncated, code_index: code_idx })
 }
 
 // ---------------------------------------------------------------------------

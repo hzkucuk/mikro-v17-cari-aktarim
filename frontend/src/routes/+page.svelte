@@ -28,6 +28,7 @@
   let pickerTerm = $state(''), pickerBusy = $state(false), pickerTruncated = $state(false);
   let pickerCols = $state<string[]>([]), pickerRows = $state<string[][]>([]);
   let pickerSort = $state<{ col: number; dir: 1 | -1 } | null>(null);
+  let pickerError = $state(''), pickerCodeIdx = $state(0);
   // [bağlantı paneli yüksekliği, günlük şeridi yüksekliği].
   // Aradaki aktarım tablosu (grid) 1fr ile kalan tüm alanı alır → en geniş bölüm.
   let panelHeights = $state([300, 150]);
@@ -63,16 +64,16 @@
   // ---- F10 cari arama (picker) ----
   function openPicker(row: Row, field: 'eski' | 'yeni') {
     pickerRow = row; pickerField = field; pickerTerm = row[field] || ''; pickerSort = null;
-    pickerCols = []; pickerRows = []; pickerTruncated = false;
+    pickerCols = []; pickerRows = []; pickerTruncated = false; pickerError = '';
     void searchCari();
   }
   async function searchCari() {
     if (!pickerRow) return;
-    pickerBusy = true;
+    pickerBusy = true; pickerError = '';
     try {
-      const r = await invoke<{ columns: string[]; rows: string[][]; truncated: boolean }>('search_cari', { cfg, view: CARI_VIEW, term: pickerTerm, limit: 500 });
-      pickerCols = r.columns; pickerRows = r.rows; pickerTruncated = r.truncated;
-    } catch (e) { log(`Cari arama hatası: ${e}`); pickerCols = []; pickerRows = []; }
+      const r = await invoke<{ columns: string[]; rows: string[][]; truncated: boolean; codeIndex: number }>('search_cari', { cfg, view: CARI_VIEW, term: pickerTerm, limit: 500 });
+      pickerCols = r.columns; pickerRows = r.rows; pickerTruncated = r.truncated; pickerCodeIdx = r.codeIndex ?? 0;
+    } catch (e) { pickerError = String(e); log(`Cari arama hatası: ${e}`); pickerCols = []; pickerRows = []; }
     finally { pickerBusy = false; }
   }
   function pickerSortBy(col: number) {
@@ -83,12 +84,8 @@
     const { col, dir } = pickerSort;
     return [...pickerRows].sort((a, b) => (a[col] ?? '').localeCompare(b[col] ?? '', 'tr', { numeric: true }) * dir);
   });
-  function codeColIndex(): number {
-    const i = pickerCols.findIndex((c) => c.toLowerCase() === 'cari_kod');
-    return i >= 0 ? i : 0;
-  }
   function selectCari(cells: string[]) {
-    if (pickerRow) pickerRow[pickerField] = cells[codeColIndex()] ?? '';
+    if (pickerRow) pickerRow[pickerField] = cells[pickerCodeIdx] ?? cells[0] ?? '';
     closePicker();
   }
   function closePicker() { pickerRow = null; pickerRows = []; pickerCols = []; }
@@ -279,11 +276,12 @@
       </div>
       <div class="picker-grid">
         {#if pickerBusy}<p class="picker-empty">Aranıyor…</p>
-        {:else if !pickerCols.length}<p class="picker-empty">Sonuç yok. Farklı bir arama deneyin (örn. <code>*{pickerTerm || '30'}*</code>).</p>
+        {:else if pickerError}<p class="picker-empty error">⚠ Arama hatası:<br />{pickerError}</p>
+        {:else if !pickerCols.length}<p class="picker-empty">Kayıt bulunamadı. Farklı bir arama deneyin (örn. <code>*{pickerTerm || '30'}*</code>) veya boş bırakıp <b>Ara</b>.</p>
         {:else}
           <table>
-            <thead><tr>{#each pickerCols as c, i}<th onclick={() => pickerSortBy(i)}>{c}{pickerSort?.col === i ? (pickerSort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>{/each}</tr></thead>
-            <tbody>{#each pickerView as cells}<tr onclick={() => selectCari(cells)}>{#each cells as v}<td>{v}</td>{/each}</tr>{/each}</tbody>
+            <thead><tr>{#each pickerCols as c, i}<th class={i === pickerCodeIdx ? 'code-col' : ''} onclick={() => pickerSortBy(i)}>{c}{pickerSort?.col === i ? (pickerSort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>{/each}</tr></thead>
+            <tbody>{#each pickerView as cells}<tr onclick={() => selectCari(cells)}>{#each cells as v, i}<td class={i === pickerCodeIdx ? 'code-col' : ''}>{v}</td>{/each}</tr>{/each}</tbody>
           </table>
         {/if}
       </div>
@@ -555,7 +553,10 @@
   .picker-grid tbody td { padding:5px 10px; border-bottom:1px solid #eef1f4; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace }
   .picker-grid tbody tr { cursor:pointer }
   .picker-grid tbody tr:hover td { background:#eff5ff }
-  .picker-empty { padding:24px; color:#6b7280; text-align:center }
+  .picker-empty { padding:24px; color:#6b7280; text-align:center; line-height:1.6 }
+  .picker-empty.error { color:#b91c1c; font-weight:500 }
+  .picker-grid th.code-col, .picker-grid td.code-col { background:#eff5ff }
+  .picker-grid th.code-col { color:#0a5cff }
   .picker-empty code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#eef1f5; border:1px solid #dfe3e9; border-radius:4px; padding:1px 5px }
   .picker-count { font-size:11.5px; color:#6b7280 }
 
