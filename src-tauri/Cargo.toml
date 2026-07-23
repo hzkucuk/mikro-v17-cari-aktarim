@@ -32,6 +32,11 @@ serde_json = "1"
 # bağımsız. winauth (Windows Integrated Auth) ve tds73 (datetime2 vb.) korunur.
 tiberius = { version = "0.12", default-features = false, features = ["tds73", "chrono", "winauth", "sql-browser-tokio", "rustls"] }
 
+# SQL parolasını diskte şifreli saklamak için (saf Rust, platform bağımsız).
+# Parola AES-256-GCM ile, cihazda tutulan rastgele bir anahtarla şifrelenir.
+aes-gcm = "0.10"
+getrandom = "0.2"
+
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 futures-util = "0.3"

@@ -21,6 +21,13 @@
   let cariTipi = $state(0), userId = $state(1), sonDegGuncelle = $state(false);
   let previewSql = $state<string | null>(null), previewBusy = $state(false);
   let appVersion = $state('v0.1.9');
+  let rememberPassword = $state(false), settingsMsg = $state('');
+  // F10 cari arama (picker) durumu
+  const CARI_VIEW = 'dbo.CARI_HESAPLAR_CHOOSE_2A_1';
+  let pickerRow = $state<Row | null>(null), pickerField = $state<'eski' | 'yeni'>('eski');
+  let pickerTerm = $state(''), pickerBusy = $state(false), pickerTruncated = $state(false);
+  let pickerCols = $state<string[]>([]), pickerRows = $state<string[][]>([]);
+  let pickerSort = $state<{ col: number; dir: 1 | -1 } | null>(null);
   // [bağlantı paneli yüksekliği, günlük şeridi yüksekliği].
   // Aradaki aktarım tablosu (grid) 1fr ile kalan tüm alanı alır → en geniş bölüm.
   let panelHeights = $state([300, 150]);
@@ -28,6 +35,63 @@
   const reset = () => { connectionOk = false; backupOk = false; };
   const cleanTriggers = () => triggers.filter((t) => t.name.trim() || t.table.trim());
   const cleanRows = () => rows.filter((r) => r.eski.trim() || r.yeni.trim());
+
+  // ---- Kalıcı ayarlar (parola AES-256-GCM ile şifreli saklanır) ----
+  type SettingsPayload = { server: string; database: string; auth: string; username: string; trustCert: boolean; backupDirectory: string; triggers: Trigger[]; cariTipi: number; userId: number; sonDegGuncelle: boolean; rememberPassword: boolean; password: string };
+  async function loadSettings() {
+    try {
+      const s = await invoke<SettingsPayload>('load_settings');
+      if (!s || !s.server) return; // henüz kayıt yok
+      cfg.server = s.server; cfg.database = s.database; cfg.auth = s.auth || cfg.auth;
+      cfg.username = s.username || ''; cfg.trustCert = s.trustCert; cfg.password = s.password || '';
+      backupDirectory = s.backupDirectory || backupDirectory;
+      if (s.triggers?.length) triggers = s.triggers;
+      cariTipi = s.cariTipi ?? 0; userId = s.userId ?? 1; sonDegGuncelle = !!s.sonDegGuncelle;
+      rememberPassword = !!s.rememberPassword;
+      log('Kayıtlı ayarlar yüklendi.');
+    } catch (e) { log(`Ayarlar yüklenemedi: ${e}`); }
+  }
+  async function saveSettings() {
+    try {
+      await invoke('save_settings', { payload: { server: cfg.server, database: cfg.database, auth: cfg.auth, username: cfg.username, trustCert: cfg.trustCert, backupDirectory, triggers: cleanTriggers(), cariTipi, userId, sonDegGuncelle, rememberPassword, password: cfg.password } });
+      settingsMsg = rememberPassword ? 'Ayarlar kaydedildi (parola şifreli).' : 'Ayarlar kaydedildi.';
+      log(settingsMsg);
+      setTimeout(() => settingsMsg = '', 4000);
+    } catch (e) { settingsMsg = `Kaydedilemedi: ${e}`; log(settingsMsg); }
+  }
+
+  // ---- F10 cari arama (picker) ----
+  function openPicker(row: Row, field: 'eski' | 'yeni') {
+    pickerRow = row; pickerField = field; pickerTerm = row[field] || ''; pickerSort = null;
+    pickerCols = []; pickerRows = []; pickerTruncated = false;
+    void searchCari();
+  }
+  async function searchCari() {
+    if (!pickerRow) return;
+    pickerBusy = true;
+    try {
+      const r = await invoke<{ columns: string[]; rows: string[][]; truncated: boolean }>('search_cari', { cfg, view: CARI_VIEW, term: pickerTerm, limit: 500 });
+      pickerCols = r.columns; pickerRows = r.rows; pickerTruncated = r.truncated;
+    } catch (e) { log(`Cari arama hatası: ${e}`); pickerCols = []; pickerRows = []; }
+    finally { pickerBusy = false; }
+  }
+  function pickerSortBy(col: number) {
+    pickerSort = pickerSort && pickerSort.col === col ? { col, dir: (pickerSort.dir * -1) as 1 | -1 } : { col, dir: 1 };
+  }
+  const pickerView = $derived.by(() => {
+    if (!pickerSort) return pickerRows;
+    const { col, dir } = pickerSort;
+    return [...pickerRows].sort((a, b) => (a[col] ?? '').localeCompare(b[col] ?? '', 'tr', { numeric: true }) * dir);
+  });
+  function codeColIndex(): number {
+    const i = pickerCols.findIndex((c) => c.toLowerCase() === 'cari_kod');
+    return i >= 0 ? i : 0;
+  }
+  function selectCari(cells: string[]) {
+    if (pickerRow) pickerRow[pickerField] = cells[codeColIndex()] ?? '';
+    closePicker();
+  }
+  function closePicker() { pickerRow = null; pickerRows = []; pickerCols = []; }
 
   onMount(() => {
     let unlistenRow: (() => void) | undefined;
@@ -41,6 +105,7 @@
     };
     fitPanels(); window.addEventListener('resize', fitPanels);
     void getVersion().then((version) => appVersion = `v${version}`).catch(() => undefined);
+    void loadSettings();
     void (async () => {
       unlistenRow = await listen<Row & { index: number }>('row-status', ({ payload }) => {
         rows[payload.index] = { ...rows[payload.index], status: payload.status, message: payload.message };
@@ -147,9 +212,9 @@
     {#if cfg.auth === 'sql'}<label>Kullanıcı <input bind:value={cfg.username} /></label><label>Şifre <input type="password" bind:value={cfg.password} /></label>{/if}
     <label class="backup-field">Yedek klasörü <span class="picker"><input bind:value={backupDirectory} oninput={reset} /><button onclick={chooseFolder}>Seç…</button></span></label>
   </div><div class="triggers"><b>Yönetilecek trigger’lar</b>{#each triggers as trigger}<div><input placeholder="dbo.trigger" bind:value={trigger.name} /><input placeholder="dbo.TABLO" bind:value={trigger.table} /><button onclick={() => triggers = triggers.filter((x) => x !== trigger)}>×</button></div>{/each}<button onclick={() => triggers = [...triggers, { name: '', table: '' }]}>+ Trigger ekle</button></div><details><summary>Gelişmiş ayarlar</summary><div class="advanced"><label class="cari-tipi">Cari tipi <select bind:value={cariTipi}><option value={0}>0 — Cari Hesap (müşteri/tedarikçi)</option><option value={1}>1 — Satıcı / Temsilci</option><option value={2}>2 — Banka Hesabı</option><option value={3}>3 — Hizmet</option><option value={4}>4 — Kasa</option><option value={5}>5 — Masraf Merkezi / Gider</option><option value={7}>7 — Personel (bordro)</option><option value={8}>8 — Demirbaş</option><option value={9}>9 — EXIM (ithalat/ihracat)</option></select></label><label>Aktif User ID <input type="number" min="0" bind:value={userId} /></label><label><input type="checkbox" bind:checked={sonDegGuncelle} /> Son değişiklik bilgilerini güncelle</label></div></details>
-  <footer><button class="primary" onclick={testConnection} disabled={running}>Bağlantıyı Test Et</button><button class="danger" onclick={backup} disabled={!connectionOk || running}>Önce Yedek Al</button><button class="secondary" onclick={() => update(true)} disabled={running || updateBusy}>{updateBusy ? 'Güncelleme Denetleniyor…' : 'Güncelleme Denetle'}</button><button onclick={triggerStatus} disabled={running}>Trigger Durumu</button><button class="outline" onclick={enableTriggers} disabled={running}>Trigger’ı Geri Aç</button><span>{info}</span></footer></section>
+  <footer><button class="primary" onclick={testConnection} disabled={running}>Bağlantıyı Test Et</button><button class="danger" onclick={backup} disabled={!connectionOk || running}>Önce Yedek Al</button><button class="secondary" onclick={() => update(true)} disabled={running || updateBusy}>{updateBusy ? 'Güncelleme Denetleniyor…' : 'Güncelleme Denetle'}</button><button onclick={triggerStatus} disabled={running}>Trigger Durumu</button><button class="outline" onclick={enableTriggers} disabled={running}>Trigger’ı Geri Aç</button><label class="remember"><input type="checkbox" bind:checked={rememberPassword} /> Şifreyi hatırla</label><button onclick={saveSettings} title="Tüm ayarları kaydeder. 'Şifreyi hatırla' işaretliyse SQL parolası AES-256 ile şifreli saklanır.">💾 Ayarları Kaydet</button><span>{settingsMsg || info}</span></footer></section>
   <div class="splitter" role="separator" aria-label="Bağlantı ve aktarım alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(0, event)}></div>
-  <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><input bind:value={row.eski} /></td><td><input bind:value={row.yeni} /></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}>{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? 'İşleniyor…' : row.message || '—'}</td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={openPreview} disabled={!connectionOk || !backupOk || running || previewBusy}>{previewBusy ? 'SQL Hazırlanıyor…' : 'Aktarımı Başlat'}</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button></footer></section>
+  <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur. Kod hücrelerinin sağındaki <b>…</b> ile cari arayabilirsiniz (Mikro F10). Örnek dosya: <code>ornek-cari-aktarim.csv</code>.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()} title={"CSV / metin dosyası (UTF-8). Sütunlar ; , veya TAB ile ayrılır:\n  1) Eski Cari Kodu  (zorunlu)\n  2) Yeni Cari Kodu  (zorunlu)\n  3) Eski Kart Silinsin  (opsiyonel): 1 veya boş = sil, 0/hayır/false = koru\nBaşlık satırı otomatik atlanır.\nÖrnek satır:  120.1.INT.HB.1156 ; ESK-120.1.INT.HB.1156 ; 1"}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><div class="cell-pick"><input bind:value={row.eski} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'eski')}>…</button></div></td><td><div class="cell-pick"><input bind:value={row.yeni} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'yeni')}>…</button></div></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}>{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? 'İşleniyor…' : row.message || '—'}</td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={openPreview} disabled={!connectionOk || !backupOk || running || previewBusy}>{previewBusy ? 'SQL Hazırlanıyor…' : 'Aktarımı Başlat'}</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button></footer></section>
   <div class="splitter" role="separator" aria-label="Aktarım ve günlük alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(1, event)}></div>
   <section class="log"><h2>İşlem günlüğü</h2><div class="section-tools"><button onclick={() => navigator.clipboard.writeText(logs.join('\n'))}>Kopyala</button><button onclick={() => logs = []}>Temizle</button></div><pre>{logs.join('\n')}</pre></section>
   </div>
@@ -166,6 +231,33 @@
         <span class="spacer"></span>
         <button class="secondary" onclick={() => previewSql = null}>Vazgeç</button>
         <button class="success" onclick={confirmTransfer}>Onayla ve Aktar</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if pickerRow !== null}
+  <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Cari arama">
+    <div class="modal picker-modal">
+      <div class="modal-head">Cari Ara — {pickerField === 'eski' ? 'Eski' : 'Yeni'} kod · {CARI_VIEW}</div>
+      <div class="picker-search">
+        <input placeholder="Kod ara:  120*  ·  *30*  ·  boş = tümü" bind:value={pickerTerm} onkeydown={(e) => { if (e.key === 'Enter') searchCari(); }} />
+        <button class="primary" onclick={searchCari} disabled={pickerBusy}>{pickerBusy ? 'Aranıyor…' : 'Ara'}</button>
+      </div>
+      <div class="picker-grid">
+        {#if pickerBusy}<p class="picker-empty">Aranıyor…</p>
+        {:else if !pickerCols.length}<p class="picker-empty">Sonuç yok. Farklı bir arama deneyin (örn. <code>*{pickerTerm || '30'}*</code>).</p>
+        {:else}
+          <table>
+            <thead><tr>{#each pickerCols as c, i}<th onclick={() => pickerSortBy(i)}>{c}{pickerSort?.col === i ? (pickerSort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>{/each}</tr></thead>
+            <tbody>{#each pickerView as cells}<tr onclick={() => selectCari(cells)}>{#each cells as v}<td>{v}</td>{/each}</tr>{/each}</tbody>
+          </table>
+        {/if}
+      </div>
+      <div class="modal-actions">
+        <span class="picker-count">{pickerRows.length} kayıt{pickerTruncated ? ' · ilk 500 gösteriliyor' : ''} · satıra tıkla = seç</span>
+        <span class="spacer"></span>
+        <button class="secondary" onclick={closePicker}>Kapat</button>
       </div>
     </div>
   </div>
@@ -393,6 +485,40 @@
     border-top:1px solid #e5e7eb; background:#fbfcfd;
   }
   .modal-actions .spacer { flex:1 }
+
+  /* Kod hücresi + "…" arama düğmesi */
+  .cell-pick { display:flex; align-items:stretch }
+  .cell-pick input { flex:1 }
+  .pick-btn {
+    min-height:auto; border:none; background:transparent; color:#0a5cff;
+    font-weight:700; font-size:16px; line-height:1; padding:0 10px; border-radius:0;
+    border-left:1px solid #eef1f4;
+  }
+  .pick-btn:hover:not(:disabled) { background:#eff5ff }
+
+  /* "Şifreyi hatırla" etiketi (footer) */
+  .remember { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#475569; font-weight:500 }
+  .remember input { width:auto; min-height:auto }
+
+  /* Cari arama (picker) modalı */
+  .picker-modal { width:min(1000px,100%); height:min(78vh,760px) }
+  .picker-search { display:flex; gap:8px; padding:12px 16px; border-bottom:1px solid #e5e7eb; background:#fbfcfd }
+  .picker-search input { flex:1 }
+  .picker-grid { flex:1; overflow:auto; background:#fff }
+  .picker-grid table { width:100%; border-collapse:collapse; font-size:12.5px }
+  .picker-grid thead th {
+    position:sticky; top:0; z-index:1; background:#f1f4f8; color:#475569;
+    font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.02em;
+    text-align:left; padding:7px 10px; border-bottom:1px solid #d9dce1; white-space:nowrap; cursor:pointer;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  .picker-grid thead th:hover { background:#e7ecf3 }
+  .picker-grid tbody td { padding:5px 10px; border-bottom:1px solid #eef1f4; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace }
+  .picker-grid tbody tr { cursor:pointer }
+  .picker-grid tbody tr:hover td { background:#eff5ff }
+  .picker-empty { padding:24px; color:#6b7280; text-align:center }
+  .picker-empty code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#eef1f5; border:1px solid #dfe3e9; border-radius:4px; padding:1px 5px }
+  .picker-count { font-size:11.5px; color:#6b7280 }
 
   /* Dar ekran: paneller alt alta, ayraçlar gizli, tek sütun */
   @media(max-width:700px){

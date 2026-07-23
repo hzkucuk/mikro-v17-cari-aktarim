@@ -42,7 +42,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriggerCfg {
     /// örn. "dbo.tr_Siparis_ForinsertUpdate"
     pub name: String,
@@ -787,6 +787,121 @@ async fn transfer_one_inner(
         .map_err(|e| format!("msp_CariKodunuDegistir başarısız: {e}"))?;
 
     Ok(format!("{step1}, referanslar aktarıldı"))
+}
+
+// ---------------------------------------------------------------------------
+// F10 cari arama (CARI_HESAPLAR_CHOOSE_2A_1 view'ı)
+// ---------------------------------------------------------------------------
+
+/// Cari arama sonucu: kolon başlıkları + satırlar (hepsi string olarak).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CariSearchResult {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub truncated: bool,
+}
+
+/// Mikro tarzı '*' joker karakterini SQL LIKE desenine çevirir.
+///   "120*" -> "120%"   "*30*" -> "%30%"   "120" -> "120%" (başlangıç)   "" -> "%"
+/// LIKE özel karakterleri (% _ [) kaçırılır ki yalnızca '*' joker olsun.
+fn mikro_like_pattern(term: &str) -> String {
+    let term = term.trim();
+    if term.is_empty() {
+        return "%".to_string();
+    }
+    let mut out = String::with_capacity(term.len() + 2);
+    for ch in term.chars() {
+        match ch {
+            '*' => out.push('%'),
+            '%' | '_' | '[' => {
+                out.push('[');
+                out.push(ch);
+                out.push(']');
+            }
+            other => out.push(other),
+        }
+    }
+    // Hiç joker kullanılmadıysa "başlangıç" araması yap.
+    if !out.contains('%') {
+        out.push('%');
+    }
+    out
+}
+
+/// CARI_HESAPLAR_CHOOSE_2A_1 view'ında cari_kod üzerinde LIKE araması yapar.
+/// View adı katı doğrulamadan geçirilir. Sonuçlar string'e çevrilir.
+pub async fn search_cari(
+    cfg: &DbConfig,
+    view: &str,
+    term: &str,
+    limit: i32,
+) -> Result<CariSearchResult, String> {
+    let view_ident = validate_qualified_ident(view)?;
+    let limit = limit.clamp(1, 5000);
+    let pattern = mikro_like_pattern(term);
+
+    let mut client = connect(cfg).await?;
+
+    // Kolon adlarını sırayla al (görüntüleme başlıkları için).
+    let short_name = view.rsplit('.').next().unwrap_or(view).trim_matches(|c| c == '[' || c == ']');
+    let col_rows = client
+        .query(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS \
+             WHERE TABLE_NAME = @P1 ORDER BY ORDINAL_POSITION",
+            &[&short_name],
+        )
+        .await
+        .map_err(|e| format!("View kolonları alınamadı: {e}"))?
+        .into_first_result()
+        .await
+        .map_err(|e| format!("View kolonları okunamadı: {e}"))?;
+    let columns: Vec<String> = col_rows
+        .into_iter()
+        .filter_map(|r| r.get::<&str, _>(0).map(str::to_owned))
+        .collect();
+    if columns.is_empty() {
+        return Err(format!("'{view}' bulunamadı veya kolonu yok."));
+    }
+
+    // Tüm kolonları sunucu tarafında nvarchar'a çeviriyoruz; böylece türden
+    // bağımsız olarak hepsini string okuyabiliriz (tarih, sayı, bit dahil).
+    let select_list = columns
+        .iter()
+        .map(|c| format!("CONVERT(nvarchar(4000), [{c}]) AS [{c}]"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // TOP (limit+1) ile bir fazla çekip kırpılma olup olmadığını anlarız.
+    let sql = format!(
+        "SELECT TOP ({}) {select_list} FROM {view_ident} \
+         WHERE CONVERT(nvarchar(200), [cari_kod]) LIKE @P1 ORDER BY [cari_kod]",
+        limit + 1
+    );
+    let result_rows = client
+        .query(&sql, &[&pattern])
+        .await
+        .map_err(|e| format!("Cari arama başarısız: {e}"))?
+        .into_first_result()
+        .await
+        .map_err(|e| format!("Arama sonucu okunamadı: {e}"))?;
+
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for row in result_rows.into_iter() {
+        let mut cells = Vec::with_capacity(columns.len());
+        for i in 0..columns.len() {
+            let val = row.try_get::<&str, _>(i).ok().flatten().unwrap_or("");
+            cells.push(val.to_string());
+        }
+        rows.push(cells);
+    }
+
+    let truncated = rows.len() as i32 > limit;
+    if truncated {
+        rows.truncate(limit as usize);
+    }
+
+    Ok(CariSearchResult { columns, rows, truncated })
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 //! Mikro V17 Cari Kartı Aktarma — Tauri komut katmanı.
 
 mod db;
+mod settings;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -377,6 +378,22 @@ async fn preview_transfer_sql(
     )
 }
 
+/// F10 cari arama: verilen view'da '*' joker desteğiyle cari_kod araması yapar.
+#[tauri::command]
+async fn search_cari(
+    cfg: DbConfig,
+    view: String,
+    term: String,
+    limit: i32,
+) -> Result<db::CariSearchResult, String> {
+    let view = if view.trim().is_empty() {
+        "dbo.CARI_HESAPLAR_CHOOSE_2A_1".to_string()
+    } else {
+        view
+    };
+    db::search_cari(&cfg, &view, &term, if limit <= 0 { 500 } else { limit }).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -394,6 +411,9 @@ pub fn run() {
             run_transfer,
             cancel_transfer,
             enable_trigger,
+            search_cari,
+            settings::save_settings,
+            settings::load_settings,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri uygulaması başlatılamadı");
