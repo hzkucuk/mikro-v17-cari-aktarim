@@ -8,3 +8,11 @@ src-tauri/gen/
 
 # Generated Python bytecode
 tools/__pycache__/
+
+# `cargo tauri icon` çıktısından masaüstü için kullanılmayan mobil/store ikonları
+src-tauri/icons/android/
+src-tauri/icons/ios/
+src-tauri/icons/Square*Logo.png
+src-tauri/icons/StoreLogo.png
+src-tauri/icons/64x64.png
+src-tauri/icons/icon.png

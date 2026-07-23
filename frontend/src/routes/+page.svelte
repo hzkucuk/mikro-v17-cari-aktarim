@@ -7,7 +7,10 @@
 
   type Row = { eski: string; yeni: string; sil: boolean; status?: string; message?: string };
   type Trigger = { name: string; table: string };
-  let cfg = $state({ server: '10.0.0.10', database: 'MikroDesktop_BEDIR_2017_TEST', auth: 'windows', username: '', password: '', trustCert: true });
+  // Windows Integrated Auth yalnızca Windows'ta çalışır; macOS/Linux'ta
+  // varsayılanı SQL Server Auth yaparak gereksiz bağlantı hatasını önlüyoruz.
+  const defaultAuth = (typeof navigator !== 'undefined' && !/Win/i.test(navigator.userAgent)) ? 'sql' : 'windows';
+  let cfg = $state({ server: '10.0.0.10', database: 'MikroDesktop_BEDIR_2017_TEST', auth: defaultAuth, username: '', password: '', trustCert: true });
   let backupDirectory = $state('C:\\MikroYedek');
   let triggers = $state<Trigger[]>([{ name: 'dbo.tr_Siparis_ForinsertUpdate', table: 'dbo.SIPARISLER' }]);
   let rows = $state<Row[]>([{ eski: '', yeni: '', sil: true }]);
