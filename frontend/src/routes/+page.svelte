@@ -170,198 +170,228 @@
 
 <style>
   /* ---------------------------------------------------------------
-     Mikro V17 grid görünümü: mor gradient zemin, koyu lacivert panel
-     başlıkları, siyah çerçeveler, kod alanlarında Consolas monospace.
+     Temiz / modern arayüz: sistem fontu, yumuşak açık palet, ince
+     kenarlıklar, küçük radius, mavi vurgu (#0a5cff). Monospace yalnızca
+     kod/kimlik alanlarında (sunucu, kod, trigger, SQL, günlük).
      --------------------------------------------------------------- */
   :global(*) { box-sizing: border-box }
   :global(html), :global(body) { height:100%; margin:0 }
   :global(body) {
-    background:#e4e8f0;
+    background:#eef1f4;
     color:#1a1a1a;
-    font:13px "Segoe UI",Tahoma,sans-serif;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    font-size:13px;
+    -webkit-font-smoothing:antialiased;
   }
 
   main { height:100vh; min-height:0; display:flex; flex-direction:column; overflow:hidden }
 
-  /* Başlık şeridi — pencere kenarına dayalı (full-bleed) */
+  /* Üst şerit — hafif gradient toolbar */
   header {
     display:flex; justify-content:space-between; align-items:center;
-    background:#fff; border-bottom:1px solid #000;
+    background:linear-gradient(180deg,#ffffff 0%,#f2f4f7 100%);
+    border-bottom:1px solid #d9dce1; box-shadow:0 1px 2px rgba(0,0,0,.04);
     padding:10px clamp(14px,2.4vw,24px);
   }
   h1,h2,p { margin:0 }
-  h1 { font-size:17px; font-weight:600; color:#1f2a44 }
+  h1 { font-size:15px; font-weight:600; color:#1f2937; letter-spacing:-.01em }
   small {
-    font:12px Consolas,"Courier New",monospace; color:#666;
-    background:#eef0f4; border:1px solid #c8ccd4; border-radius:3px;
-    padding:1px 6px; margin-left:6px; vertical-align:middle;
+    font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    color:#0a5cff; background:rgba(10,92,255,.08); border:1px solid rgba(10,92,255,.18);
+    border-radius:5px; padding:1px 7px; margin-left:8px; vertical-align:middle;
   }
-  p { color:#6b7280; margin-top:2px; font-size:11px }
-  .version { font-family:Consolas,ui-monospace,monospace; color:#475569 }
+  p { color:#6b7280; margin-top:3px; font-size:11px }
+  .version { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#475569 }
 
-  /* Kırmızı yedek uyarı bandı */
+  /* Yedek uyarısı — sakin ama net (yumuşak kırmızı bant) */
   .warning {
-    background:#c62828; color:#fff; font-weight:600; letter-spacing:.2px;
-    text-align:center; padding:7px clamp(14px,2.4vw,24px);
+    background:#fef2f2; color:#b42318; font-weight:600;
+    text-align:center; padding:8px clamp(14px,2.4vw,24px);
+    border-bottom:1px solid #fbcfc9;
   }
 
-  /* İçerik alanı — pencereyi tümüyle doldurur, kenarda boşluk yok */
-  .workspace { flex:1; min-height:0; display:grid; overflow:auto; background:#c8d0de }
+  /* İçerik alanı — pencereyi tümüyle doldurur */
+  .workspace { flex:1; min-height:0; display:grid; overflow:auto; background:#eef1f4 }
 
-  /* Paneller: beyaz gövde, üst/alt siyah çerçeve (yanlar pencere kenarında) */
+  /* Paneller: beyaz gövde, ince üst kenarlık */
   section {
     min-width:0; min-height:0; overflow:auto; position:relative;
-    background:#fff; border-top:1px solid #000;
+    background:#fff; border-top:1px solid #e2e5ea;
     padding:0 clamp(14px,2.4vw,24px) 14px;
   }
 
-  /* Koyu lacivert panel başlıkları — Mikro grid header'ı */
+  /* Panel başlıkları — açık, minik büyük harf etiket */
   h2 {
-    font-size:12px; font-weight:600; background:#3c4a5e; color:#fff;
-    margin:0 clamp(-24px,-2.4vw,-14px) 14px; padding:6px clamp(14px,2.4vw,24px);
-    border-bottom:1px solid #000;
+    font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+    color:#64748b; background:#f8fafc;
+    margin:0 clamp(-24px,-2.4vw,-14px) 14px; padding:9px clamp(14px,2.4vw,24px);
+    border-bottom:1px solid #e5e7eb;
   }
 
   /* Form alanları */
-  .form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px }
-  .form label, .triggers { display:grid; gap:5px; font-weight:600; font-size:12px; color:#333 }
+  .form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; align-items:start }
+  .form label, .triggers { display:grid; gap:6px; font-weight:600; font-size:12px; color:#475569 }
   .picker, .triggers>div { display:flex; gap:6px }
+  .auth-field span { display:flex; gap:6px; align-items:center; flex-wrap:wrap }
+  .auth-field select { flex:1 1 180px }
 
   input, select {
-    width:100%; min-height:32px; padding:5px 7px;
-    border:1px solid #7a869a; border-radius:0; background:#fff;
-    font-family:Consolas,"Courier New",monospace; font-size:12.5px;
+    width:100%; min-height:34px; padding:6px 10px;
+    border:1px solid #cbd0d8; border-radius:6px; background:#fff;
+    color:#1a1a1a; font-size:13px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    transition:border-color .12s, box-shadow .12s;
   }
-  select { font-family:"Segoe UI",Tahoma,sans-serif }
-  input:focus, select:focus { outline:2px solid #2563eb; outline-offset:-1px }
+  select { font-family:inherit }
+  input::placeholder { color:#9099a5 }
+  input:focus, select:focus {
+    outline:none; border-color:#0a5cff; box-shadow:0 0 0 3px rgba(10,92,255,.14);
+  }
 
   button {
-    min-height:32px; cursor:pointer; font-weight:600; font-size:12px;
-    padding:6px 14px; border:1px solid rgba(0,0,0,.35); border-radius:2px;
-    background:#e4e7ec; color:#1a1a1a; font-family:"Segoe UI",Tahoma,sans-serif;
+    min-height:34px; cursor:pointer; font-weight:500; font-size:12.5px;
+    padding:6px 13px; border:1px solid #cbd0d8; border-radius:6px;
+    background:#fff; color:#374151;
+    transition:background .12s, border-color .12s, box-shadow .12s, transform .05s;
   }
-  button:hover:not(:disabled) { filter:brightness(1.08) }
-  button:active:not(:disabled) { transform:translateY(1px) }
+  button:hover:not(:disabled) { background:#f3f4f6; border-color:#b8bec7 }
+  button:active:not(:disabled) { transform:translateY(.5px) }
   button:disabled { opacity:.45; cursor:not-allowed }
+  button:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(10,92,255,.22) }
 
-  .primary   { background:#1d6fd0; color:#fff }
-  .danger    { background:#c62828; color:#fff }
-  .success   { background:#17803d; color:#fff }
-  .secondary { background:#4b5563; color:#fff }
-  .outline   { background:#b45309; color:#fff; border-color:rgba(0,0,0,.35) }
+  .primary   { background:#0a5cff; border-color:#0a5cff; color:#fff; font-weight:600 }
+  .primary:hover:not(:disabled)   { background:#0847c9; border-color:#0847c9 }
+  .success   { background:#16a34a; border-color:#16a34a; color:#fff; font-weight:600 }
+  .success:hover:not(:disabled)   { background:#15803d; border-color:#15803d }
+  .danger    { background:#dc2626; border-color:#dc2626; color:#fff; font-weight:600 }
+  .danger:hover:not(:disabled)    { background:#b91c1c; border-color:#b91c1c }
+  .secondary { background:#fff; border-color:#cbd0d8; color:#475569 }
+  .outline   { background:#fff; border-color:#fcd34d; color:#b45309 }
+  .outline:hover:not(:disabled)   { background:#fffbeb; border-color:#fbbf24 }
 
   .triggers { margin-top:16px }
+  .triggers b { font-weight:600; font-size:12px; color:#475569 }
   .triggers>div input { flex:1 }
-  .triggers>div button, .triggers>button { min-height:28px; padding:3px 10px }
+  .triggers>div button { min-height:34px; padding:0 12px; color:#dc2626; border-color:#e6c9c9 }
+  .triggers>div button:hover:not(:disabled) { background:#fef2f2; border-color:#f0b4b4 }
+  .triggers>button { justify-self:start; min-height:30px; padding:5px 12px }
 
   details { margin-top:14px }
-  summary { cursor:pointer; font-weight:600; font-size:12px; color:#333 }
-  .advanced { display:flex; gap:18px; align-items:center; padding:10px 0 }
-  .advanced label { display:flex; align-items:center; gap:7px; font-weight:600; font-size:12px }
+  summary { cursor:pointer; font-weight:600; font-size:12px; color:#475569; padding:4px 0 }
+  .advanced { display:flex; gap:18px; align-items:center; padding:10px 0; flex-wrap:wrap }
+  .advanced label { display:flex; align-items:center; gap:7px; font-weight:600; font-size:12px; color:#475569 }
   .advanced input[type=number] { width:100px }
   .advanced input[type=checkbox] { width:auto; min-height:auto }
-  .advanced .cari-tipi { flex-direction:column; align-items:flex-start; gap:4px }
-  .advanced .cari-tipi select { min-width:250px }
+  .advanced .cari-tipi { flex-direction:column; align-items:flex-start; gap:5px }
+  .advanced .cari-tipi select { min-width:260px }
 
   /* Aksiyon çubukları */
   footer, .section-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px }
   footer {
-    padding:10px clamp(14px,2.4vw,24px);
+    padding:12px clamp(14px,2.4vw,24px);
     margin:14px clamp(-24px,-2.4vw,-14px) -14px;
-    border-top:1px solid #d0d4dc; background:#f7f8fa;
+    border-top:1px solid #e5e7eb; background:#fbfcfd;
     /* Panel içeriği taşsa bile aksiyon butonları görünür kalsın. */
     position:sticky; bottom:-14px; z-index:2;
-    box-shadow:0 -6px 10px -6px rgba(0,0,0,.18);
+    box-shadow:0 -6px 12px -8px rgba(0,0,0,.12);
   }
   footer span { margin-left:auto; color:#6b7280; font-size:12px }
   .section-tools { margin:0 0 10px; justify-content:flex-end }
-  .section-tools button { min-height:26px; padding:2px 9px; font-size:11px; font-weight:500 }
+  .section-tools button { min-height:28px; padding:3px 11px; font-size:12px }
 
-  /* Mikro grid */
-  .table { overflow:auto; border:1px solid #000 }
-  table { width:100%; min-width:720px; border-collapse:collapse; font-size:12.5px }
+  /* Veri tablosu — hafif, yalnızca satır ayırıcılar */
+  .table { overflow:auto; border:1px solid #e2e5ea; border-radius:8px }
+  table { width:100%; min-width:720px; border-collapse:collapse; font-size:13px }
   thead th {
-    background:#d6dae2; color:#1f2a44; font-weight:600; font-size:11.5px;
-    text-align:left; padding:5px 7px; border:1px solid #000; white-space:nowrap;
+    background:#f8fafc; color:#64748b; font-weight:600; font-size:11px;
+    text-transform:uppercase; letter-spacing:.03em; text-align:left;
+    padding:9px 10px; border-bottom:1px solid #e5e7eb; white-space:nowrap;
   }
-  tbody td { border:1px solid #9aa2b1; padding:0; background:#fff }
-  tbody tr:nth-child(even) td { background:#f4f6f9 }
-  tbody td:first-child { text-align:center; font-family:Consolas,monospace; font-size:11.5px; color:#6b7280; padding:5px 0 }
+  tbody td { border-bottom:1px solid #eef1f4; padding:0; background:#fff }
+  tbody tr:last-child td { border-bottom:none }
+  tbody tr:hover td { background:#f8fafc }
+  tbody td:first-child { text-align:center; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; color:#9099a5; padding:7px 0; width:44px }
   tbody td input:not([type=checkbox]) {
-    border:none; background:transparent; min-height:auto; padding:5px 7px;
+    border:none; border-radius:0; background:transparent; min-height:auto; padding:8px 10px; box-shadow:none;
   }
-  tbody td input:focus { outline:2px solid #2563eb; outline-offset:-2px; background:#fffbe6 }
+  tbody td input:focus { outline:none; background:#eff5ff; box-shadow:inset 0 0 0 2px rgba(10,92,255,.25) }
   tbody td:nth-child(4), tbody td:nth-child(6) { text-align:center }
-  tbody td button { min-height:auto; border:none; background:transparent; color:#c62828; font-size:14px; padding:4px 8px }
-  tbody td button:hover:not(:disabled) { background:#fde8e8; filter:none }
+  tbody td button { min-height:auto; border:none; background:transparent; color:#dc2626; font-size:15px; padding:4px 9px; border-radius:5px }
+  tbody td button:hover:not(:disabled) { background:#fef2f2 }
 
-  .hint { margin-bottom:10px; font-size:11.5px; color:#6b7280 }
-  .hint code { font-family:Consolas,monospace; background:#eef0f4; border:1px solid #c8ccd4; padding:1px 4px }
+  .hint { margin-bottom:10px; font-size:12px; color:#6b7280 }
+  .hint code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#eef1f5; border:1px solid #dfe3e9; border-radius:4px; padding:1px 5px; font-size:11.5px }
   .hidden { display:none }
 
-  /* Sürüklenebilir ayraç */
+  /* Sürüklenebilir ayraç — ince, tutamak çubuklu */
   .splitter {
-    height:8px; background:#c3b6d8; border-top:1px solid #000; border-bottom:1px solid #000;
+    height:9px; background:#eef1f4; border-top:1px solid #e2e5ea; border-bottom:1px solid #e2e5ea;
     position:relative; cursor:row-resize; touch-action:none;
   }
-  .splitter:after { content:'⋮'; position:absolute; left:50%; top:-7px; color:#3c4a5e; font-size:18px; transform:rotate(90deg) }
+  .splitter:hover { background:#e2e6ec }
+  .splitter:after {
+    content:''; position:absolute; left:50%; top:50%; width:30px; height:3px;
+    margin:-1.5px 0 0 -15px; border-radius:999px; background:#c3cad4;
+  }
 
   /* İlerleme çubuğu */
-  .progress { height:14px; background:#e4e7ec; border:1px solid #9aa2b1; overflow:hidden; margin-top:12px }
-  .progress span { display:block; height:100%; background:linear-gradient(90deg,#17803d,#22a355); transition:width .2s }
-  .progress-text { margin-top:5px; font-family:Consolas,monospace; font-size:11.5px; color:#4b5563 }
+  .progress { height:8px; background:#e5e8ec; border-radius:999px; overflow:hidden; margin-top:12px }
+  .progress span { display:block; height:100%; background:#0a5cff; border-radius:999px; transition:width .2s }
+  .progress-text { margin-top:6px; font-size:11.5px; color:#6b7280 }
 
-  /* Log paneli — koyu konsol */
+  /* Günlük — koyu konsol */
   .log { padding-bottom:0 }
   .log pre {
-    margin:0 clamp(-24px,-2.4vw,-14px); padding:10px clamp(14px,2.4vw,24px);
-    min-height:180px; background:#14181f; color:#d7dce4;
-    font-family:Consolas,"Courier New",monospace; font-size:11.5px; line-height:1.55;
+    margin:0 clamp(-24px,-2.4vw,-14px); padding:12px clamp(14px,2.4vw,24px);
+    min-height:180px; background:#1e293b; color:#cbd5e1;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.6;
     white-space:pre-wrap; word-break:break-word;
   }
 
   /* Orta genişlik (tablet / dar pencere): bağlantı formu iki sütun */
   @media(min-width:701px) and (max-width:1100px){
-    .connection .form { grid-template-columns:1fr 1fr; gap:8px 12px }
+    .connection .form { grid-template-columns:1fr 1fr; gap:10px 14px }
     .connection .backup-field { grid-column:span 2 }
   }
 
   /* Geniş ekran: bağlantı formu üç sütun, kompakt satır yükseklikleri */
   @media(min-width:1101px){
-    .connection .form { grid-template-columns:1.15fr 1.15fr 1.1fr; gap:8px 12px }
+    .connection .form { grid-template-columns:1.15fr 1.15fr 1.1fr; gap:10px 14px }
     .connection .backup-field { grid-column:span 2 }
-    .connection input, .connection select { min-height:30px; padding:4px 7px }
-    .connection .triggers { margin-top:10px; gap:4px }
-    .connection details { margin-top:8px }
-    .connection .advanced { padding:5px 0 }
+    .connection input, .connection select { min-height:32px; padding:5px 9px }
+    .connection .triggers { margin-top:12px; gap:5px }
+    .connection details { margin-top:10px }
+    .connection .advanced { padding:6px 0 }
   }
 
   /* SQL önizleme modalı */
   .modal-backdrop {
     position:fixed; inset:0; z-index:100; padding:24px;
-    background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center;
+    background:rgba(15,23,42,.5); display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(2px);
   }
   .modal {
-    background:#fff; border:1px solid #000; width:min(860px,100%);
-    max-height:86vh; display:flex; flex-direction:column;
+    background:#fff; border:1px solid #e2e5ea; border-radius:10px; width:min(860px,100%);
+    max-height:86vh; display:flex; flex-direction:column; overflow:hidden;
+    box-shadow:0 20px 50px -12px rgba(0,0,0,.35);
   }
   .modal-head {
-    background:#3c4a5e; color:#fff; font-weight:600; font-size:12.5px;
-    padding:8px 14px; border-bottom:1px solid #000;
+    background:#f8fafc; color:#1f2937; font-weight:600; font-size:13px;
+    padding:12px 16px; border-bottom:1px solid #e5e7eb;
   }
   .modal-note {
-    background:#fff3cd; color:#7a5b00; font-size:11.5px; line-height:1.5;
-    padding:8px 14px; border-bottom:1px solid #e6d9a8;
+    background:#fffbeb; color:#92400e; font-size:12px; line-height:1.5;
+    padding:10px 16px; border-bottom:1px solid #fde68a;
   }
   .modal-sql {
-    margin:0; padding:12px 14px; overflow:auto; flex:1;
-    background:#14181f; color:#d7dce4;
-    font-family:Consolas,"Courier New",monospace; font-size:12px; line-height:1.5;
+    margin:0; padding:14px 16px; overflow:auto; flex:1;
+    background:#1e293b; color:#cbd5e1;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.55;
     white-space:pre; tab-size:4;
   }
   .modal-actions {
-    display:flex; gap:8px; align-items:center; padding:10px 14px;
-    border-top:1px solid #d0d4dc; background:#f7f8fa;
+    display:flex; gap:8px; align-items:center; padding:12px 16px;
+    border-top:1px solid #e5e7eb; background:#fbfcfd;
   }
   .modal-actions .spacer { flex:1 }
 
