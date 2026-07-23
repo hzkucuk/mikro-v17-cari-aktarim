@@ -404,7 +404,7 @@ async fn search_cari(
     } else {
         view
     };
-    db::search_cari(&cfg, &view, &term, if limit <= 0 { 500 } else { limit }).await
+    db::search_cari(&cfg, &view, &term, if limit <= 0 { 100000 } else { limit }).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

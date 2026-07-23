@@ -28,7 +28,8 @@
   let pickerTerm = $state(''), pickerBusy = $state(false), pickerTruncated = $state(false);
   let pickerCols = $state<string[]>([]), pickerRows = $state<string[][]>([]);
   let pickerSort = $state<{ col: number; dir: 1 | -1 } | null>(null);
-  let pickerError = $state(''), pickerCodeIdx = $state(0);
+  let pickerError = $state(''), pickerCodeIdx = $state(0), pickerActive = $state(0);
+  let pickerTimer: ReturnType<typeof setTimeout> | undefined;
   // [bağlantı paneli yüksekliği, günlük şeridi yüksekliği].
   // Aradaki aktarım tablosu (grid) 1fr ile kalan tüm alanı alır → en geniş bölüm.
   let panelHeights = $state([300, 150]);
@@ -71,13 +72,32 @@
     if (!pickerRow) return;
     pickerBusy = true; pickerError = '';
     try {
-      const r = await invoke<{ columns: string[]; rows: string[][]; truncated: boolean; codeIndex: number }>('search_cari', { cfg, view: CARI_VIEW, term: pickerTerm, limit: 500 });
-      pickerCols = r.columns; pickerRows = r.rows; pickerTruncated = r.truncated; pickerCodeIdx = r.codeIndex ?? 0;
+      const r = await invoke<{ columns: string[]; rows: string[][]; truncated: boolean; codeIndex: number }>('search_cari', { cfg, view: CARI_VIEW, term: pickerTerm, limit: 0 });
+      pickerCols = r.columns; pickerRows = r.rows; pickerTruncated = r.truncated; pickerCodeIdx = r.codeIndex ?? 0; pickerActive = 0;
     } catch (e) { pickerError = String(e); log(`Cari arama hatası: ${e}`); pickerCols = []; pickerRows = []; }
     finally { pickerBusy = false; }
   }
+  // Yazdıkça (debounce) otomatik ara.
+  function pickerInput() { clearTimeout(pickerTimer); pickerTimer = setTimeout(() => void searchCari(), 300); }
+  function scrollActive() {
+    requestAnimationFrame(() => document.querySelector('.picker-grid tbody tr.active')?.scrollIntoView({ block: 'nearest' }));
+  }
+  // Klavye: ok tuşları / PageUp-Down / Home-End ile gez, Enter seç, Esc kapat.
+  function pickerKeydown(e: KeyboardEvent) {
+    const n = pickerView.length;
+    const clamp = (v: number) => Math.max(0, Math.min(n - 1, v));
+    if (e.key === 'ArrowDown') { e.preventDefault(); pickerActive = clamp(pickerActive + 1); scrollActive(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); pickerActive = clamp(pickerActive - 1); scrollActive(); }
+    else if (e.key === 'PageDown') { e.preventDefault(); pickerActive = clamp(pickerActive + 12); scrollActive(); }
+    else if (e.key === 'PageUp') { e.preventDefault(); pickerActive = clamp(pickerActive - 12); scrollActive(); }
+    else if (e.key === 'Home') { e.preventDefault(); pickerActive = 0; scrollActive(); }
+    else if (e.key === 'End') { e.preventDefault(); pickerActive = clamp(n - 1); scrollActive(); }
+    else if (e.key === 'Enter') { e.preventDefault(); const row = pickerView[pickerActive]; if (row) selectCari(row); }
+    else if (e.key === 'Escape') { e.preventDefault(); closePicker(); }
+  }
   function pickerSortBy(col: number) {
     pickerSort = pickerSort && pickerSort.col === col ? { col, dir: (pickerSort.dir * -1) as 1 | -1 } : { col, dir: 1 };
+    pickerActive = 0;
   }
   const pickerView = $derived.by(() => {
     if (!pickerSort) return pickerRows;
@@ -244,7 +264,7 @@
   </div><div class="triggers"><b>Yönetilecek trigger’lar</b>{#each triggers as trigger}<div><input placeholder="dbo.trigger" bind:value={trigger.name} /><input placeholder="dbo.TABLO" bind:value={trigger.table} /><button onclick={() => triggers = triggers.filter((x) => x !== trigger)}>×</button></div>{/each}<button onclick={() => triggers = [...triggers, { name: '', table: '' }]}>+ Trigger ekle</button></div><details><summary>Gelişmiş ayarlar</summary><div class="advanced"><label class="cari-tipi">Cari tipi <select bind:value={cariTipi}><option value={0}>0 — Cari Hesap (müşteri/tedarikçi)</option><option value={1}>1 — Satıcı / Temsilci</option><option value={2}>2 — Banka Hesabı</option><option value={3}>3 — Hizmet</option><option value={4}>4 — Kasa</option><option value={5}>5 — Masraf Merkezi / Gider</option><option value={7}>7 — Personel (bordro)</option><option value={8}>8 — Demirbaş</option><option value={9}>9 — EXIM (ithalat/ihracat)</option></select></label><label>Aktif User ID <input type="number" min="0" bind:value={userId} /></label><label><input type="checkbox" bind:checked={sonDegGuncelle} /> Son değişiklik bilgilerini güncelle</label></div></details>
   <footer><button class="primary" onclick={testConnection} disabled={running}>Bağlantıyı Test Et</button><button class="danger" onclick={backup} disabled={!connectionOk || running}>Önce Yedek Al</button><button class="secondary" onclick={() => update(true)} disabled={running || updateBusy}>{updateBusy ? 'Güncelleme Denetleniyor…' : 'Güncelleme Denetle'}</button><button onclick={triggerStatus} disabled={running}>Trigger Durumu</button><button class="outline" onclick={enableTriggers} disabled={running}>Trigger’ı Geri Aç</button><label class="remember"><input type="checkbox" bind:checked={rememberPassword} /> Şifreyi hatırla</label><button onclick={saveSettings} title="Tüm ayarları kaydeder. 'Şifreyi hatırla' işaretliyse SQL parolası AES-256 ile şifreli saklanır.">💾 Ayarları Kaydet</button><span>{settingsMsg || info}</span></footer></section>
   <div class="splitter" role="separator" aria-label="Bağlantı ve aktarım alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(0, event)}></div>
-  <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur. Kod hücrelerinin sağındaki <b>…</b> ile cari arayabilirsiniz (Mikro F10). Örnek dosya: <code>ornek-cari-aktarim.csv</code>.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()} title={"CSV / metin dosyası (UTF-8). Sütunlar ; , veya TAB ile ayrılır:\n  1) Eski Cari Kodu  (zorunlu)\n  2) Yeni Cari Kodu  (zorunlu)\n  3) Eski Kart Silinsin  (opsiyonel): 1 veya boş = sil, 0/hayır/false = koru\nBaşlık satırı otomatik atlanır.\nÖrnek satır:  120.1.INT.HB.1156 ; ESK-120.1.INT.HB.1156 ; 1"}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button><button onclick={() => validateRows(false)} disabled={validating || !connectionOk} title="Satırları DB'de ön kontrol et: eski kod var mı, yeni kod zaten mevcut mu">{validating ? 'Kontrol…' : '✓ Doğrula'}</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><div class="cell-pick"><input bind:value={row.eski} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'eski')}>…</button></div></td><td><div class="cell-pick"><input bind:value={row.yeni} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'yeni')}>…</button></div></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}><span class="rowstat {row.status ?? ''}">{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? '⏳ İşleniyor…' : row.status === 'valid' ? '✓ Hazır' : row.status === 'invalid' ? `⚠ ${row.message ?? 'Sorun'}` : (row.message || '—')}</span></td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={openPreview} disabled={!connectionOk || !backupOk || running || previewBusy}>{previewBusy ? 'SQL Hazırlanıyor…' : 'Aktarımı Başlat'}</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button></footer></section>
+  <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur. Kod hücrelerinin sağındaki <b>…</b> ile cari arayabilirsiniz (Mikro F10). Örnek dosya: <code>ornek-cari-aktarim.csv</code>.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()} title={"CSV / metin dosyası (UTF-8). Sütunlar ; , veya TAB ile ayrılır:\n  1) Eski Cari Kodu  (zorunlu)\n  2) Yeni Cari Kodu  (zorunlu)\n  3) Eski Kart Silinsin  (opsiyonel): 1 veya boş = sil, 0/hayır/false = koru\nBaşlık satırı otomatik atlanır.\nÖrnek satır:  120.1.INT.HB.1156 ; ESK-120.1.INT.HB.1156 ; 1"}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button><button onclick={() => validateRows(false)} disabled={validating || !connectionOk} title="Satırları DB'de ön kontrol et: eski kod var mı, yeni kod zaten mevcut mu">{validating ? 'Kontrol…' : '✓ Doğrula'}</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><div class="cell-pick"><input bind:value={row.eski} onkeydown={(e) => { if (e.key === 'F10') { e.preventDefault(); openPicker(row, 'eski'); } }} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'eski')}>…</button></div></td><td><div class="cell-pick"><input bind:value={row.yeni} onkeydown={(e) => { if (e.key === 'F10') { e.preventDefault(); openPicker(row, 'yeni'); } }} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'yeni')}>…</button></div></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}><span class="rowstat {row.status ?? ''}">{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? '⏳ İşleniyor…' : row.status === 'valid' ? '✓ Hazır' : row.status === 'invalid' ? `⚠ ${row.message ?? 'Sorun'}` : (row.message || '—')}</span></td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={openPreview} disabled={!connectionOk || !backupOk || running || previewBusy}>{previewBusy ? 'SQL Hazırlanıyor…' : 'Aktarımı Başlat'}</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button></footer></section>
   <div class="splitter" role="separator" aria-label="Aktarım ve günlük alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(1, event)}></div>
   <section class="log"><h2>İşlem günlüğü</h2><div class="section-tools"><button onclick={() => navigator.clipboard.writeText(logs.join('\n'))}>Kopyala</button><button onclick={() => logs = []}>Temizle</button></div><pre>{logs.join('\n')}</pre></section>
   </div>
@@ -271,7 +291,8 @@
     <div class="modal picker-modal">
       <div class="modal-head">Cari Ara — {pickerField === 'eski' ? 'Eski' : 'Yeni'} kod · {CARI_VIEW}</div>
       <div class="picker-search">
-        <input placeholder="Kod ara:  120*  ·  *30*  ·  boş = tümü" bind:value={pickerTerm} onkeydown={(e) => { if (e.key === 'Enter') searchCari(); }} />
+        <!-- svelte-ignore a11y_autofocus -->
+        <input autofocus placeholder="Kod ara:  120*  ·  *30*  ·  boş = tümü  ·  ↑↓ gez · Enter seç" bind:value={pickerTerm} oninput={pickerInput} onkeydown={pickerKeydown} />
         <button class="primary" onclick={searchCari} disabled={pickerBusy}>{pickerBusy ? 'Aranıyor…' : 'Ara'}</button>
       </div>
       <div class="picker-grid">
@@ -281,12 +302,12 @@
         {:else}
           <table>
             <thead><tr>{#each pickerCols as c, i}<th class={i === pickerCodeIdx ? 'code-col' : ''} onclick={() => pickerSortBy(i)}>{c}{pickerSort?.col === i ? (pickerSort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>{/each}</tr></thead>
-            <tbody>{#each pickerView as cells}<tr onclick={() => selectCari(cells)}>{#each cells as v, i}<td class={i === pickerCodeIdx ? 'code-col' : ''}>{v}</td>{/each}</tr>{/each}</tbody>
+            <tbody>{#each pickerView as cells, i}<tr class={i === pickerActive ? 'active' : ''} onclick={() => pickerActive = i} ondblclick={() => selectCari(cells)}>{#each cells as v, j}<td class={j === pickerCodeIdx ? 'code-col' : ''}>{v}</td>{/each}</tr>{/each}</tbody>
           </table>
         {/if}
       </div>
       <div class="modal-actions">
-        <span class="picker-count">{pickerRows.length} kayıt{pickerTruncated ? ' · ilk 500 gösteriliyor' : ''} · satıra tıkla = seç</span>
+        <span class="picker-count">{pickerRows.length} kayıt{pickerTruncated ? '+ (çok fazla — daha çok daraltın)' : ''} · ↑↓ PgUp/PgDn gez · Enter/çift-tık seç</span>
         <span class="spacer"></span>
         <button class="secondary" onclick={closePicker}>Kapat</button>
       </div>
@@ -553,6 +574,8 @@
   .picker-grid tbody td { padding:5px 10px; border-bottom:1px solid #eef1f4; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace }
   .picker-grid tbody tr { cursor:pointer }
   .picker-grid tbody tr:hover td { background:#eff5ff }
+  .picker-grid tbody tr.active td { background:#dbeafe }
+  .picker-grid tbody tr.active td.code-col { background:#bfdbfe }
   .picker-empty { padding:24px; color:#6b7280; text-align:center; line-height:1.6 }
   .picker-empty.error { color:#b91c1c; font-weight:500 }
   .picker-grid th.code-col, .picker-grid td.code-col { background:#eff5ff }

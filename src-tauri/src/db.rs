@@ -901,8 +901,77 @@ fn mikro_like_pattern(term: &str) -> String {
     out
 }
 
-/// CARI_HESAPLAR_CHOOSE_2A_1 view'ında cari_kod üzerinde LIKE araması yapar.
-/// View adı katı doğrulamadan geçirilir. Sonuçlar string'e çevrilir.
+/// Bir değer GUID biçiminde mi (8-4-4-4-12 hex)?
+fn looks_like_guid(s: &str) -> bool {
+    let s = s.trim();
+    s.len() == 36
+        && s.as_bytes().iter().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => *b == b'-',
+            _ => b.is_ascii_hexdigit(),
+        })
+}
+
+/// "msg_S_1032" gibi bir alias'ı (tip harfi, kod) olarak ayrıştırır.
+fn parse_msg_alias(col: &str) -> Option<(char, String)> {
+    let lower = col.to_ascii_lowercase();
+    let rest = lower.strip_prefix("msg_")?;
+    let mut it = rest.chars();
+    let typ = it.next()?;
+    if !typ.is_ascii_alphabetic() {
+        return None;
+    }
+    let num = it.as_str().strip_prefix('_')?;
+    if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+        Some((typ.to_ascii_uppercase(), num.to_string()))
+    } else {
+        None
+    }
+}
+
+/// msg_S_XXXX / msg_C_XXXX alias başlıklarını Mikro dil kaynağından
+/// (dbo.fn_GetResource) Türkçe karşılıklarına çevirir. Fonksiyon yoksa ham kalır.
+async fn resolve_headers(client: &mut SqlClient, columns: &[String]) -> Vec<String> {
+    let mut selects = Vec::new();
+    let mut idxs = Vec::new();
+    for (i, c) in columns.iter().enumerate() {
+        if let Some((typ, code)) = parse_msg_alias(c) {
+            selects.push(format!("dbo.fn_GetResource('{typ}','{code}','')"));
+            idxs.push(i);
+        }
+    }
+    let mut out = columns.to_vec();
+    if selects.is_empty() {
+        return out;
+    }
+    let sql = format!("SELECT {}", selects.join(", "));
+    let resolved: Vec<String> = match client.query(&sql, &[]).await {
+        Ok(s) => match s.into_first_result().await {
+            Ok(rows) => rows
+                .into_iter()
+                .next()
+                .map(|row| {
+                    (0..idxs.len())
+                        .map(|i| row.try_get::<&str, _>(i).ok().flatten().unwrap_or("").to_string())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        },
+        Err(_) => Vec::new(), // fn_GetResource yoksa sessizce ham başlıkları kullan
+    };
+    for (k, &i) in idxs.iter().enumerate() {
+        if let Some(name) = resolved.get(k) {
+            if !name.trim().is_empty() {
+                out[i] = name.trim().to_string();
+            }
+        }
+    }
+    out
+}
+
+/// CARI_HESAPLAR_CHOOSE_2A_1 gibi view'larda cari kodu üzerinde LIKE araması
+/// yapar. Başlıklar Türkçeye çevrilir, GUID kolonları gizlenir, kod kolonu
+/// otomatik seçilir. View adı katı doğrulamadan geçirilir.
 pub async fn search_cari(
     cfg: &DbConfig,
     view: &str,
@@ -910,7 +979,7 @@ pub async fn search_cari(
     limit: i32,
 ) -> Result<CariSearchResult, String> {
     let view_ident = validate_qualified_ident(view)?;
-    let limit = limit.clamp(1, 5000);
+    let limit = limit.clamp(1, 100000);
     let pattern = mikro_like_pattern(term);
 
     let mut client = connect(cfg).await?;
@@ -936,24 +1005,74 @@ pub async fn search_cari(
         return Err(format!("'{view}' bulunamadı veya kolonu yok."));
     }
 
-    // Arama/sıralama/seçim anahtarı: bu CHOOSE view'larında kod kolonu bazen
-    // 'cari_kod', bazen msg_S_XXXX gibi alias'la gelir. 'cari_kod' varsa onu,
-    // yoksa ilk kolonu anahtar kabul ediyoruz (CHOOSE view'larında kod ilk gelir).
-    let code_idx = columns
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case("cari_kod"))
-        .unwrap_or(0);
-    let code_col = columns[code_idx].clone();
+    // Başlıkları Türkçeye çevir (msg_S_XXXX -> fn_GetResource).
+    let display = resolve_headers(&mut client, &columns).await;
 
-    // Tüm kolonları sunucu tarafında nvarchar'a çeviriyoruz; böylece türden
-    // bağımsız olarak hepsini string okuyabiliriz (tarih, sayı, bit dahil).
-    let select_list = columns
+    // Örnek satırlarla kolonları sınıflandır (GUID mi, dolu mu).
+    let all_conv = columns
         .iter()
         .map(|c| format!("CONVERT(nvarchar(4000), [{c}]) AS [{c}]"))
         .collect::<Vec<_>>()
         .join(", ");
+    let sample = client
+        .query(&format!("SELECT TOP (40) {all_conv} FROM {view_ident}"), &[])
+        .await
+        .map_err(|e| format!("Örnek satır alınamadı: {e}"))?
+        .into_first_result()
+        .await
+        .map_err(|e| format!("Örnek satır okunamadı: {e}"))?;
+    let sample_rows: Vec<Vec<String>> = sample
+        .into_iter()
+        .map(|row| {
+            (0..columns.len())
+                .map(|i| row.try_get::<&str, _>(i).ok().flatten().unwrap_or("").to_string())
+                .collect()
+        })
+        .collect();
 
-    // TOP (limit+1) ile bir fazla çekip kırpılma olup olmadığını anlarız.
+    // GUID kolonu: örnekteki dolu değerlerin tümü GUID biçiminde.
+    let is_guid: Vec<bool> = (0..columns.len())
+        .map(|i| {
+            let vals: Vec<&str> = sample_rows
+                .iter()
+                .map(|r| r[i].as_str())
+                .filter(|s| !s.is_empty())
+                .collect();
+            !vals.is_empty() && vals.iter().all(|s| looks_like_guid(s))
+        })
+        .collect();
+
+    // Görünür kolonlar = GUID olmayanlar (hiçbiri kalmazsa hepsini göster).
+    let mut visible: Vec<usize> = (0..columns.len()).filter(|&i| !is_guid[i]).collect();
+    if visible.is_empty() {
+        visible = (0..columns.len()).collect();
+    }
+
+    // Kod kolonu (ham indeks): önce ada göre ("kod"), sonra ilk dolu görünür kolon.
+    let code_raw = visible
+        .iter()
+        .copied()
+        .find(|&i| {
+            let l = display[i].to_lowercase();
+            l.contains("cari kod") || l.contains("kart kod") || l == "kod" || l == "kodu"
+        })
+        .or_else(|| {
+            visible
+                .iter()
+                .copied()
+                .find(|&i| sample_rows.iter().any(|r| !r[i].is_empty()))
+        })
+        .unwrap_or(visible[0]);
+    let code_col = columns[code_raw].clone();
+    let code_index = visible.iter().position(|&i| i == code_raw).unwrap_or(0);
+
+    // Ana sorgu: yalnız görünür kolonlar, kod kolonunda LIKE. Limit yüksek
+    // tutulur (kullanıcı '*' ile daraltır; boş = tümü).
+    let select_list = visible
+        .iter()
+        .map(|&i| format!("CONVERT(nvarchar(4000), [{}]) AS [{}]", columns[i], columns[i]))
+        .collect::<Vec<_>>()
+        .join(", ");
     let sql = format!(
         "SELECT TOP ({}) {select_list} FROM {view_ident} \
          WHERE CONVERT(nvarchar(400), [{code_col}]) LIKE @P1 ORDER BY [{code_col}]",
@@ -969,11 +1088,9 @@ pub async fn search_cari(
 
     let mut rows: Vec<Vec<String>> = Vec::new();
     for row in result_rows.into_iter() {
-        let mut cells = Vec::with_capacity(columns.len());
-        for i in 0..columns.len() {
-            let val = row.try_get::<&str, _>(i).ok().flatten().unwrap_or("");
-            cells.push(val.to_string());
-        }
+        let cells: Vec<String> = (0..visible.len())
+            .map(|i| row.try_get::<&str, _>(i).ok().flatten().unwrap_or("").to_string())
+            .collect();
         rows.push(cells);
     }
 
@@ -982,7 +1099,8 @@ pub async fn search_cari(
         rows.truncate(limit as usize);
     }
 
-    Ok(CariSearchResult { columns, rows, truncated, code_index: code_idx })
+    let headers: Vec<String> = visible.iter().map(|&i| display[i].clone()).collect();
+    Ok(CariSearchResult { columns: headers, rows, truncated, code_index })
 }
 
 // ---------------------------------------------------------------------------
