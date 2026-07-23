@@ -44,8 +44,10 @@
       unlistenLog = await listen<string>('log', ({ payload }) => log(payload));
       unlistenProgress = await listen<{ done: number; total: number }>('progress', ({ payload }) => progress = payload);
     })();
-    const updateTimer = window.setTimeout(() => void update(false), 900);
-    return () => { window.clearTimeout(updateTimer); window.removeEventListener('resize', fitPanels); unlistenRow?.(); unlistenLog?.(); unlistenProgress?.(); };
+    // Açılışta otomatik güncelleme denetimi yapmıyoruz: güncelleme sunucusu
+    // yapılandırılmadığı için her açılışta log'a hata düşerdi. Kullanıcı
+    // "Güncelleme Denetle" ile elle tetikler.
+    return () => { window.removeEventListener('resize', fitPanels); unlistenRow?.(); unlistenLog?.(); unlistenProgress?.(); };
   });
 
   async function testConnection() {
@@ -131,5 +133,173 @@
 </main>
 
 <style>
-  :global(*) { box-sizing: border-box } :global(html),:global(body) { height:100%;margin:0 } :global(body) { background:#f5f7fb;color:#172033;font:14px Inter,Segoe UI,sans-serif } main { height:100vh;min-height:720px;display:flex;flex-direction:column;overflow:hidden } header,section,.warning { padding:16px clamp(16px,3vw,44px) } header { display:flex;justify-content:space-between;align-items:center;background:white;border-bottom:1px solid #dce3ef } h1,h2,p { margin:0 } h1{font-size:19px} small{font:12px monospace;background:#e8edf5;padding:2px 6px;border-radius:4px} p{color:#64748b;margin-top:3px;font-size:12px}.version{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#475569}.warning{background:#b42318;color:white;text-align:center;font-weight:700}.workspace{flex:1;min-height:0;display:grid;overflow:auto;background:#e4eaf3}section{min-width:0;min-height:0;overflow:auto;background:white;position:relative}h2{font-size:14px;background:#253858;color:white;margin:-16px -44px 16px;padding:10px 44px}.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.form label,.triggers{display:grid;gap:6px;font-weight:600}.picker,.triggers>div{display:flex;gap:6px}input,select,button{min-height:34px;border:1px solid #bbc7d8;border-radius:5px;padding:6px 9px;background:white}input,select{width:100%}button{cursor:pointer;font-weight:600}.primary{background:#2563eb;color:white}.danger{background:#b42318;color:white}.success{background:#15803d;color:white}.secondary{background:#475569;color:white}.outline{color:#9a3412;border-color:#fb923c}.triggers{margin-top:16px}.triggers>div input{flex:1}details{margin-top:14px}summary{cursor:pointer;font-weight:600}.advanced{display:flex;gap:18px;align-items:center;padding:10px 0}.advanced label{display:flex;align-items:center;gap:7px}.advanced input[type=number]{width:100px}.advanced input[type=checkbox]{width:auto;min-height:auto}footer,.section-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px}footer span{margin-left:auto;color:#475569}.section-tools{margin:0 0 12px;justify-content:flex-end}.table{overflow:auto;border:1px solid #dbe3ee;border-radius:6px}table{width:100%;min-width:720px;border-collapse:collapse}th,td{padding:7px;border:1px solid #dbe3ee;text-align:left}th{background:#edf2f9}.hint{margin-bottom:12px}.hidden{display:none}.splitter{height:8px;background:#d5deeb;border-top:1px solid #b9c6d8;border-bottom:1px solid #b9c6d8;position:relative;cursor:row-resize;touch-action:none}.splitter:after{content:'⋮';position:absolute;left:50%;top:-7px;color:#64748b;font-size:18px;transform:rotate(90deg)}.progress{height:10px;background:#e4eaf3;border-radius:6px;overflow:hidden;margin-top:12px}.progress span{display:block;height:100%;background:#2563eb;transition:width .2s}.progress-text{margin-top:5px}.log{padding-bottom:0}.log pre{margin:0 -44px;padding:14px 44px;min-height:180px;background:#111827;color:#d1fae5;white-space:pre-wrap}@media(min-width:901px){.connection{padding-top:10px;padding-bottom:10px}.connection h2{margin-top:-10px;margin-bottom:10px}.connection .form{grid-template-columns:1.15fr 1.15fr 1.1fr;gap:8px 12px}.connection .backup-field{grid-column:span 2}.connection .form label{gap:3px}.connection input,.connection select,.connection button{min-height:30px;padding:4px 8px}.connection .triggers{margin-top:10px;gap:4px}.connection details{margin-top:8px}.connection .advanced{padding:5px 0}.connection footer{margin-top:8px}.connection footer button{min-height:30px}.connection footer span{font-size:12px}}@media(max-width:900px){main{height:auto;min-height:100vh;overflow:visible}.workspace{display:block!important;overflow:visible}.splitter{display:none}.connection,.transfer,.log{overflow:visible}.form{grid-template-columns:1fr}header{align-items:flex-start;gap:10px;flex-direction:column}h2{margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px}.advanced{align-items:flex-start;flex-direction:column}.log pre{margin:0 -16px;padding:14px 16px}}
+  /* ---------------------------------------------------------------
+     Mikro V17 grid görünümü: mor gradient zemin, koyu lacivert panel
+     başlıkları, siyah çerçeveler, kod alanlarında Consolas monospace.
+     --------------------------------------------------------------- */
+  :global(*) { box-sizing: border-box }
+  :global(html), :global(body) { height:100%; margin:0 }
+  :global(body) {
+    background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+    color:#1a1a1a;
+    font:13px "Segoe UI",Tahoma,sans-serif;
+  }
+
+  main { height:100vh; min-height:720px; display:flex; flex-direction:column; overflow:hidden }
+
+  /* Başlık şeridi */
+  header {
+    display:flex; justify-content:space-between; align-items:center;
+    background:#fff; border:1px solid #000; border-bottom:none;
+    padding:10px clamp(16px,3vw,44px);
+  }
+  h1,h2,p { margin:0 }
+  h1 { font-size:17px; font-weight:600; color:#1f2a44 }
+  small {
+    font:12px Consolas,"Courier New",monospace; color:#666;
+    background:#eef0f4; border:1px solid #c8ccd4; border-radius:3px;
+    padding:1px 6px; margin-left:6px; vertical-align:middle;
+  }
+  p { color:#6b7280; margin-top:2px; font-size:11px }
+  .version { font-family:Consolas,ui-monospace,monospace; color:#475569 }
+
+  /* Kırmızı yedek uyarı bandı */
+  .warning {
+    background:#c62828; color:#fff; font-weight:600; letter-spacing:.2px;
+    text-align:center; padding:7px clamp(16px,3vw,44px);
+    border:1px solid #000; border-top:none;
+  }
+
+  .workspace { flex:1; min-height:0; display:grid; overflow:auto; padding:12px clamp(10px,2vw,24px) 28px }
+
+  /* Paneller: beyaz gövde, siyah çerçeve */
+  section {
+    min-width:0; min-height:0; overflow:auto; position:relative;
+    background:#fff; border:1px solid #000;
+    padding:0 clamp(14px,2.4vw,24px) 14px;
+  }
+
+  /* Koyu lacivert panel başlıkları — Mikro grid header'ı */
+  h2 {
+    font-size:12px; font-weight:600; background:#3c4a5e; color:#fff;
+    margin:0 clamp(-24px,-2.4vw,-14px) 14px; padding:6px clamp(14px,2.4vw,24px);
+    border-bottom:1px solid #000;
+  }
+
+  /* Form alanları */
+  .form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px }
+  .form label, .triggers { display:grid; gap:5px; font-weight:600; font-size:12px; color:#333 }
+  .picker, .triggers>div { display:flex; gap:6px }
+
+  input, select {
+    width:100%; min-height:32px; padding:5px 7px;
+    border:1px solid #7a869a; border-radius:0; background:#fff;
+    font-family:Consolas,"Courier New",monospace; font-size:12.5px;
+  }
+  select { font-family:"Segoe UI",Tahoma,sans-serif }
+  input:focus, select:focus { outline:2px solid #2563eb; outline-offset:-1px }
+
+  button {
+    min-height:32px; cursor:pointer; font-weight:600; font-size:12px;
+    padding:6px 14px; border:1px solid rgba(0,0,0,.35); border-radius:2px;
+    background:#e4e7ec; color:#1a1a1a; font-family:"Segoe UI",Tahoma,sans-serif;
+  }
+  button:hover:not(:disabled) { filter:brightness(1.08) }
+  button:active:not(:disabled) { transform:translateY(1px) }
+  button:disabled { opacity:.45; cursor:not-allowed }
+
+  .primary   { background:#1d6fd0; color:#fff }
+  .danger    { background:#c62828; color:#fff }
+  .success   { background:#17803d; color:#fff }
+  .secondary { background:#4b5563; color:#fff }
+  .outline   { background:#b45309; color:#fff; border-color:rgba(0,0,0,.35) }
+
+  .triggers { margin-top:16px }
+  .triggers>div input { flex:1 }
+  .triggers>div button, .triggers>button { min-height:28px; padding:3px 10px }
+
+  details { margin-top:14px }
+  summary { cursor:pointer; font-weight:600; font-size:12px; color:#333 }
+  .advanced { display:flex; gap:18px; align-items:center; padding:10px 0 }
+  .advanced label { display:flex; align-items:center; gap:7px; font-weight:600; font-size:12px }
+  .advanced input[type=number] { width:100px }
+  .advanced input[type=checkbox] { width:auto; min-height:auto }
+
+  /* Aksiyon çubukları */
+  footer, .section-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px }
+  footer {
+    padding:10px clamp(14px,2.4vw,24px);
+    margin:14px clamp(-24px,-2.4vw,-14px) -14px;
+    border-top:1px solid #d0d4dc; background:#f7f8fa;
+    /* Panel içeriği taşsa bile aksiyon butonları görünür kalsın. */
+    position:sticky; bottom:-14px; z-index:2;
+    box-shadow:0 -6px 10px -6px rgba(0,0,0,.18);
+  }
+  footer span { margin-left:auto; color:#6b7280; font-size:12px }
+  .section-tools { margin:0 0 10px; justify-content:flex-end }
+  .section-tools button { min-height:26px; padding:2px 9px; font-size:11px; font-weight:500 }
+
+  /* Mikro grid */
+  .table { overflow:auto; border:1px solid #000 }
+  table { width:100%; min-width:720px; border-collapse:collapse; font-size:12.5px }
+  thead th {
+    background:#d6dae2; color:#1f2a44; font-weight:600; font-size:11.5px;
+    text-align:left; padding:5px 7px; border:1px solid #000; white-space:nowrap;
+  }
+  tbody td { border:1px solid #9aa2b1; padding:0; background:#fff }
+  tbody tr:nth-child(even) td { background:#f4f6f9 }
+  tbody td:first-child { text-align:center; font-family:Consolas,monospace; font-size:11.5px; color:#6b7280; padding:5px 0 }
+  tbody td input:not([type=checkbox]) {
+    border:none; background:transparent; min-height:auto; padding:5px 7px;
+  }
+  tbody td input:focus { outline:2px solid #2563eb; outline-offset:-2px; background:#fffbe6 }
+  tbody td:nth-child(4), tbody td:nth-child(6) { text-align:center }
+  tbody td button { min-height:auto; border:none; background:transparent; color:#c62828; font-size:14px; padding:4px 8px }
+  tbody td button:hover:not(:disabled) { background:#fde8e8; filter:none }
+
+  .hint { margin-bottom:10px; font-size:11.5px; color:#6b7280 }
+  .hint code { font-family:Consolas,monospace; background:#eef0f4; border:1px solid #c8ccd4; padding:1px 4px }
+  .hidden { display:none }
+
+  /* Sürüklenebilir ayraç */
+  .splitter {
+    height:8px; background:#c3b6d8; border-top:1px solid #000; border-bottom:1px solid #000;
+    position:relative; cursor:row-resize; touch-action:none;
+  }
+  .splitter:after { content:'⋮'; position:absolute; left:50%; top:-7px; color:#3c4a5e; font-size:18px; transform:rotate(90deg) }
+
+  /* İlerleme çubuğu */
+  .progress { height:14px; background:#e4e7ec; border:1px solid #9aa2b1; overflow:hidden; margin-top:12px }
+  .progress span { display:block; height:100%; background:linear-gradient(90deg,#17803d,#22a355); transition:width .2s }
+  .progress-text { margin-top:5px; font-family:Consolas,monospace; font-size:11.5px; color:#4b5563 }
+
+  /* Log paneli — koyu konsol */
+  .log { padding-bottom:0 }
+  .log pre {
+    margin:0 clamp(-24px,-2.4vw,-14px); padding:10px clamp(14px,2.4vw,24px);
+    min-height:180px; background:#14181f; color:#d7dce4;
+    font-family:Consolas,"Courier New",monospace; font-size:11.5px; line-height:1.55;
+    white-space:pre-wrap; word-break:break-word;
+  }
+
+  /* Kompakt bağlantı paneli (geniş ekran) */
+  @media(min-width:901px){
+    .connection .form { grid-template-columns:1.15fr 1.15fr 1.1fr; gap:8px 12px }
+    .connection .backup-field { grid-column:span 2 }
+    .connection input, .connection select { min-height:30px; padding:4px 7px }
+    .connection .triggers { margin-top:10px; gap:4px }
+    .connection details { margin-top:8px }
+    .connection .advanced { padding:5px 0 }
+  }
+
+  /* Dar ekran: paneller alt alta, ayraçlar gizli */
+  @media(max-width:900px){
+    main { height:auto; min-height:100vh; overflow:visible }
+    .workspace { display:block!important; overflow:visible }
+    .splitter { display:none }
+    .connection, .transfer, .log { overflow:visible; margin-bottom:12px }
+    .form { grid-template-columns:1fr }
+    header { align-items:flex-start; gap:10px; flex-direction:column }
+    .advanced { align-items:flex-start; flex-direction:column }
+  }
 </style>

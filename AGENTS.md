@@ -22,8 +22,8 @@ talimatıdır. Bir özelliği “tamamlandı” veya “yayına hazır” diye b
 
 - Yeni bir ihtiyaçta önce resmi Tauri eklentileri ve resmi dokümantasyon
   kontrol edilir; uygun eklenti yoksa özel kod yazılır.
-- UI kontrolleri SvelteKit içinde geliştirilir; doğrudan `dist/` arayüzüne
-  yeni işlev eklenmez.
+- Tek arayüz kaynağı `frontend/` (SvelteKit) altındadır. Eski `dist/`
+  prototipi kaldırıldı; tekrar oluşturulmamalıdır.
 - Her UI değişikliğinden sonra çalıştır:
   `npm --prefix frontend run check` ve `npm --prefix frontend run build`.
 - Rust/Tauri değişikliği varsa ayrıca çalıştır:
