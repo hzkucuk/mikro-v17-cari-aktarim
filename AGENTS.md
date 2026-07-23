@@ -44,6 +44,10 @@ talimatıdır. Bir özelliği “tamamlandı” veya “yayına hazır” diye b
 - Uygulama sürümü `src-tauri/Cargo.toml` ve `src-tauri/tauri.conf.json` içinde
   aynı olmalıdır. Her kullanıcıya sunulacak değişiklikte sürüm artırılır ve
   başlıktaki görünür sürüm numarası paket sürümüyle doğrulanır.
+- Kullanıcıya yönelik bir committen sonra değişiklik `main` dalına gönderilir;
+  Windows build'i başarılı olduğunda aynı sürüm GitHub Release olarak
+  yayımlanır. Kullanıcı açıkça “yalnız derle” veya “yayınlama” demedikçe bu
+  adım atlanmaz.
 - Uygulama açılışında sessiz güncelleme denetimi yapar; yeni sürüm varsa
   kullanıcıya indirme/kurma seçeneği sunar. Elle denetim, “güncel” sonucunu
   da görünür biçimde gösterir.
