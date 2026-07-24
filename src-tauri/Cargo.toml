@@ -1,6 +1,6 @@
 [package]
 name = "cari-aktarim"
-version = "0.1.15"
+version = "0.1.16"
 description = "Mikro V17 Cari Kartı Aktarma — Trigger Yönetimli"
 authors = ["hzkucuk"]
 edition = "2021"

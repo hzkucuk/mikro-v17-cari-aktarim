@@ -20,7 +20,7 @@
   let csvInput: HTMLInputElement;
   let cariTipi = $state(0), userId = $state(1), sonDegGuncelle = $state(false);
   let previewSql = $state<string | null>(null), previewBusy = $state(false);
-  let appVersion = $state('v0.1.15');
+  let appVersion = $state('v0.1.16');
   let rememberPassword = $state(false), settingsMsg = $state('');
   let skipBackup = $state(false); // yedeği opsiyonel yap (test DB'si vb.)
   // Trigger yöntemi: session-context (mesai içi) | global disable (mesai dışı)
@@ -28,6 +28,9 @@
   let skipControlKey = $state('skip_siparis_kontrol');
   let guardBusy = $state(false);
   let guardModal = $state<{ install: boolean; outcomes: { trigger: string; status: string; sql: string | null }[] } | null>(null);
+  // Uygulama içi bilgi/uyarı penceresi (native alert yerine)
+  let infoModal = $state<{ title: string; body: string; tone: 'info' | 'warn' } | null>(null);
+  const showInfo = (title: string, body: string, tone: 'info' | 'warn' = 'info') => { infoModal = { title, body, tone }; };
   // F10 cari arama (picker) durumu
   const CARI_VIEW = 'dbo.CARI_HESAPLAR_CHOOSE_2A_1';
   let pickerRow = $state<Row | null>(null), pickerField = $state<'eski' | 'yeni'>('eski');
@@ -340,18 +343,38 @@
       log(`${active.length} satır CSV olarak kaydedildi: ${path}`);
     } catch (e) { log(`CSV dışa aktarma hatası: ${e}`); alert(`CSV kaydedilemedi: ${e}`); }
   }
+  const RELEASES_URL = 'https://github.com/hzkucuk/mikro-v17-cari-aktarim/releases';
   async function update(interactive = true) {
     if (updateBusy) return;
     updateBusy = true; if (interactive) info = 'Güncelleme denetleniyor…'; log('Güncelleme denetleniyor…');
     try {
       const u = await check();
-      if (!u) { info = 'Uygulama güncel'; log('Uygulama güncel.'); if (interactive) alert('Uygulama güncel.'); return; }
+      if (!u) {
+        info = 'Uygulama güncel';
+        log(`Uygulama güncel (${appVersion}).`);
+        if (interactive) showInfo('Güncelleme', `Uygulama güncel.\n\nYüklü sürüm: ${appVersion}`);
+        return;
+      }
       const install = confirm(`v${u.version} sürümü bulundu.${u.body ? `\n\nSürüm notları:\n${u.body}` : ''}\n\nİndirip kurmak ister misiniz?`);
       if (!install) { info = `v${u.version} kurulmaya hazır`; return; }
       info = `v${u.version} indiriliyor…`; log(`v${u.version} indiriliyor…`);
       await u.downloadAndInstall();
     } catch (e) {
-      const message = `Güncelleme denetimi hatası: ${e}`; log(message); if (interactive) alert(message);
+      const raw = String(e);
+      // Manifest (latest.json) yoksa/erişilemiyorsa: bu bir arıza değil,
+      // otomatik güncelleme yayını henüz yapılmamış demektir.
+      const manifestYok = /release JSON|latest\.json|404|not found|fetch/i.test(raw);
+      log(`Güncelleme denetimi: ${raw}`);
+      info = manifestYok ? 'Otomatik güncelleme yayında değil' : 'Güncelleme denetlenemedi';
+      if (interactive) {
+        showInfo(
+          'Güncelleme',
+          manifestYok
+            ? `Otomatik güncelleme şu an yayında değil (güncelleme dosyası bulunamadı).\n\nYüklü sürüm: ${appVersion}\nEn son sürümü elle indirebilirsiniz:\n${RELEASES_URL}`
+            : `Güncelleme denetlenemedi.\n\nAyrıntı: ${raw}\n\nEn son sürüm: ${RELEASES_URL}`,
+          'warn',
+        );
+      }
     } finally { updateBusy = false; }
   }
   function resizePanel(index: number, event: PointerEvent) {
@@ -396,6 +419,20 @@
         <span class="spacer"></span>
         <button class="secondary" onclick={() => previewSql = null}>Vazgeç</button>
         <button class="success" onclick={confirmTransfer}>Onayla ve Aktar</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if infoModal !== null}
+  <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label={infoModal.title}>
+    <div class="modal info-modal">
+      <div class="modal-head">{infoModal.title}</div>
+      {#if infoModal.tone === 'warn'}<div class="modal-note">ℹ Bilgi</div>{/if}
+      <pre class="info-body">{infoModal.body}</pre>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button class="primary" onclick={() => infoModal = null}>Tamam</button>
       </div>
     </div>
   </div>
@@ -675,6 +712,13 @@
     border-top:1px solid #e5e7eb; background:#fbfcfd;
   }
   .modal-actions .spacer { flex:1 }
+
+  /* Uygulama içi bilgi penceresi */
+  .info-modal { width:min(560px,100%) }
+  .info-body {
+    margin:0; padding:16px; overflow:auto; white-space:pre-wrap; word-break:break-word;
+    font-family:inherit; font-size:13px; line-height:1.6; color:#1f2937; background:#fff;
+  }
 
   /* Trigger yöntemi + muhafız */
   .trigmode { margin-top:14px; display:grid; gap:6px }
