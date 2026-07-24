@@ -20,7 +20,7 @@
   let csvInput: HTMLInputElement;
   let cariTipi = $state(0), userId = $state(1), sonDegGuncelle = $state(false);
   let previewSql = $state<string | null>(null), previewBusy = $state(false);
-  let appVersion = $state('v0.1.9');
+  let appVersion = $state('v0.1.10');
   let rememberPassword = $state(false), settingsMsg = $state('');
   let skipBackup = $state(false); // yedeği opsiyonel yap (test DB'si vb.)
   // F10 cari arama (picker) durumu
