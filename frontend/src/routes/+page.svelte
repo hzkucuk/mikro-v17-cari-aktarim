@@ -20,7 +20,7 @@
   let csvInput: HTMLInputElement;
   let cariTipi = $state(0), userId = $state(1), sonDegGuncelle = $state(false);
   let previewSql = $state<string | null>(null), previewBusy = $state(false);
-  let appVersion = $state('v0.1.14');
+  let appVersion = $state('v0.1.15');
   let rememberPassword = $state(false), settingsMsg = $state('');
   let skipBackup = $state(false); // yedeği opsiyonel yap (test DB'si vb.)
   // Trigger yöntemi: session-context (mesai içi) | global disable (mesai dışı)
@@ -104,9 +104,11 @@
   // Önbellek: tüm cari listesi bir kez çekilir, aramalar istemcide filtrelenir.
   let pickerCache: { cols: string[]; rows: string[][]; codeIndex: number } | null = null;
   // Mikro '*' jokerini regex'e çevirir (yoksa "başlangıç" araması).
+  // Türkçe büyük/küçük harf duyarsız (İ/ı, ş, ğ… doğru eşleşir).
   function wildcardToRegex(term: string): RegExp {
-    const esc = term.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
-    return new RegExp(term.includes('*') ? `^${esc}$` : `^${esc}.*`, 'i');
+    const t = term.toLocaleLowerCase('tr');
+    const esc = t.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+    return new RegExp(t.includes('*') ? `^${esc}$` : `^${esc}.*`);
   }
   function applyFilter() {
     if (!pickerCache) return;
@@ -114,8 +116,9 @@
     const term = pickerTerm.trim();
     if (!term) { pickerRows = pickerCache.rows; }
     else {
-      const rx = wildcardToRegex(term); const ci = pickerCache.codeIndex;
-      pickerRows = pickerCache.rows.filter((r) => rx.test(r[ci] ?? ''));
+      // Desen TÜM sütunlarda aranır: '120*' koda, '*şimşek*' ünvana denk gelir.
+      const rx = wildcardToRegex(term);
+      pickerRows = pickerCache.rows.filter((r) => r.some((cell) => rx.test((cell ?? '').toLocaleLowerCase('tr'))));
     }
     pickerActive = 0;
   }
@@ -427,7 +430,7 @@
       <div class="modal-head">Cari Ara — {pickerField === 'eski' ? 'Eski' : 'Yeni'} kod · {CARI_VIEW}</div>
       <div class="picker-search">
         <!-- svelte-ignore a11y_autofocus -->
-        <input autofocus placeholder="Kod ara:  120*  ·  *30*  ·  boş = tümü  ·  ↑↓ gez · Enter seç" bind:value={pickerTerm} oninput={pickerInput} />
+        <input autofocus placeholder="Kod/ünvan ara:  120*  ·  *şimşek*  ·  boş = tümü  ·  ↑↓ gez · Enter seç" bind:value={pickerTerm} oninput={pickerInput} />
         <button class="primary" onclick={() => searchCari(true)} disabled={pickerBusy} title="Listeyi veritabanından yeniden çeker (yazdıkça arama zaten anında filtreler)">{pickerBusy ? 'Yükleniyor…' : '🔄 Yenile'}</button>
       </div>
       <div class="picker-grid">
