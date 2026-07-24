@@ -412,6 +412,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|_window, _event| {
+            // macOS geleneği: pencere X ile kapatılınca uygulama çıkmasın,
+            // pencere gizlensin (uygulama Dock'ta kalır). ⌘Q ile çıkılır.
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
+                api.prevent_close();
+                let _ = _window.hide();
+            }
+        })
         .setup(|app| {
             app.manage(AppState::default());
             Ok(())
@@ -429,6 +438,16 @@ pub fn run() {
             settings::save_settings,
             settings::load_settings,
         ])
-        .run(tauri::generate_context!())
-        .expect("Tauri uygulaması başlatılamadı");
+        .build(tauri::generate_context!())
+        .expect("Tauri uygulaması başlatılamadı")
+        .run(|_app_handle, _event| {
+            // macOS: Dock ikonuna tıklanınca gizlenmiş pencereyi geri getir.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                if let Some(w) = _app_handle.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+        });
 }
