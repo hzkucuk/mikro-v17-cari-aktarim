@@ -1,0 +1,169 @@
+name: release
+
+# Sürüm etiketi (v*) push edilince tam release üretir:
+#   matris derleme (macOS + Windows) → TASLAK release → latest.json → yayınla
+# Model, çalışan e-Fatura Edit kurulumundan uyarlandı.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-14 # Apple Silicon (arm64)
+            args: '--bundles app,dmg'
+          - platform: windows-latest
+            args: '--bundles nsis'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node.js kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend bağımlılıkları
+        run: npm ci --prefix frontend
+
+      - name: Rust kur
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Tauri, NSIS ikililerini upstream'den indiriyor; ara sıra 504 dönüyor.
+      - name: NSIS önbelleği (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-nsis-3.11
+
+      - name: Derle & taslak release'e yükle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Güncelleme imzası; pubkey tauri.conf'ta gömülü. Anahtar kaybolursa
+          # kurulu uygulamalara bir daha güncelleme gönderilemez.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Mikro Cari Aktarım ${{ github.ref_name }}'
+          # ⚠️ KAPALI: açıkken her matris işi latest.json'u ezer (yarış) ve
+          # manifest eksik platformla çıkar; kullanıcı güncellemeyi hiç görmez.
+          # Manifest, matris bittikten SONRA tek elden 'publish' işinde üretilir.
+          includeUpdaterJson: false
+          # ⚠️ TASLAK: tauri-action release'i derlemenin başında oluşturur.
+          # Taslak değilse latest.json yüklenene dek /latest/download/latest.json
+          # 404 döner. Taslakta /latest eski sağlam sürümü gösterir; geçiş atomik.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: latest.json üret (taslak varlıklarından, yarışsız)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          rm -rf manifest && mkdir manifest && cd manifest
+
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sig'
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body,publishedAt,createdAt > meta.json
+
+          python3 - <<'PY'
+          import json, os, re, sys, pathlib
+
+          tag  = os.environ['TAG']
+          repo = os.environ['GITHUB_REPOSITORY']
+          base = f"https://github.com/{repo}/releases/download/{tag}"
+
+          # Ürün dosyası deseni → updater platform anahtar(lar)ı.
+          # Yalnız NSIS dağıttığımız için setup.exe hem genel hem -nsis anahtarına.
+          RULES = [
+              (r'_aarch64\.app\.tar\.gz$', ['darwin-aarch64', 'darwin-aarch64-app']),
+              (r'_x64-setup\.exe$',        ['windows-x86_64', 'windows-x86_64-nsis']),
+          ]
+          EXPECTED = 4
+
+          platforms = {}
+          for sig in sorted(pathlib.Path('.').glob('*.sig')):
+              asset = sig.name[:-4]
+              signature = sig.read_text().strip()
+              if not signature:
+                  print(f"::error::İmza dosyası boş: {sig.name}")
+                  sys.exit(1)
+              for pattern, keys in RULES:
+                  if re.search(pattern, asset):
+                      for k in keys:
+                          platforms[k] = {"signature": signature, "url": f"{base}/{asset}"}
+                      break
+              else:
+                  print(f"  (eşleşmeyen varlık, atlandı: {asset})")
+
+          meta = json.load(open('meta.json'))
+          manifest = {
+              "version":   tag.lstrip('v'),
+              "notes":     meta.get('body') or f"Mikro Cari Aktarım {tag}",
+              "pub_date":  meta.get('publishedAt') or meta.get('createdAt'),
+              "platforms": platforms,
+          }
+
+          print(f"üretilen platform sayısı: {len(platforms)} (beklenen {EXPECTED})")
+          for k in sorted(platforms):
+              print(f"  - {k}")
+
+          if len(platforms) != EXPECTED:
+              print(f"::error::latest.json {len(platforms)} platformla kurulabildi, {EXPECTED} bekleniyordu. "
+                    "Manifest YAZILMADI — eksik manifest, o platformdaki kullanıcılara güncellemeyi "
+                    "SESSİZCE göstermez. Düşen işi yeniden çalıştırın: gh run rerun <id> --failed")
+              sys.exit(1)
+
+          json.dump(manifest, open('latest.json', 'w'), indent=2, ensure_ascii=False)
+          PY
+
+          gh release upload "$TAG" latest.json --repo "$GITHUB_REPOSITORY" --clobber
+
+      # Ürettik diye doğru varsayma — release'te CANLI duran dosyayı doğrula.
+      - name: latest.json doğrula (4 anahtar, hepsi imzalı)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --output latest.json --clobber
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open('latest.json'))
+          p = d.get('platforms', {})
+          eksik = [k for k in ('darwin-aarch64','darwin-aarch64-app','windows-x86_64','windows-x86_64-nsis') if k not in p]
+          bos   = [k for k, v in p.items() if not v.get('signature') or not v.get('url')]
+          print("version:", d.get('version'), "platformlar:", sorted(p))
+          if eksik or bos:
+              print(f"::error::Eksik: {eksik} | İmzasız/URL'siz: {bos}")
+              sys.exit(1)
+          print("latest.json doğrulandı.")
+          PY
+
+      - name: Doğrulama geçti → release'i yayınla (taslaktan çıkar)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

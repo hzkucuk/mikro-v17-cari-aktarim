@@ -20,7 +20,7 @@
   let csvInput: HTMLInputElement;
   let cariTipi = $state(0), userId = $state(1), sonDegGuncelle = $state(false);
   let previewSql = $state<string | null>(null), previewBusy = $state(false);
-  let appVersion = $state('v0.1.16');
+  let appVersion = $state('v0.1.17');
   let rememberPassword = $state(false), settingsMsg = $state('');
   let skipBackup = $state(false); // yedeği opsiyonel yap (test DB'si vb.)
   // Trigger yöntemi: session-context (mesai içi) | global disable (mesai dışı)
@@ -361,17 +361,24 @@
       await u.downloadAndInstall();
     } catch (e) {
       const raw = String(e);
-      // Manifest (latest.json) yoksa/erişilemiyorsa: bu bir arıza değil,
-      // otomatik güncelleme yayını henüz yapılmamış demektir.
+      // Bu iki durum arıza değil; kullanıcıya sakin bir bilgi olarak gösterilir.
       const manifestYok = /release JSON|latest\.json|404|not found|fetch/i.test(raw);
+      // Manifest bulundu ama bu işletim sistemi için yayın yok (ör. macOS).
+      const platformYok = /fallback platforms|platforms.{0,3} object|platform.*not (found|available)/i.test(raw);
       log(`Güncelleme denetimi: ${raw}`);
-      info = manifestYok ? 'Otomatik güncelleme yayında değil' : 'Güncelleme denetlenemedi';
+      info = platformYok
+        ? 'Bu platformda otomatik güncelleme yok'
+        : manifestYok
+          ? 'Otomatik güncelleme yayında değil'
+          : 'Güncelleme denetlenemedi';
       if (interactive) {
         showInfo(
           'Güncelleme',
-          manifestYok
-            ? `Otomatik güncelleme şu an yayında değil (güncelleme dosyası bulunamadı).\n\nYüklü sürüm: ${appVersion}\nEn son sürümü elle indirebilirsiniz:\n${RELEASES_URL}`
-            : `Güncelleme denetlenemedi.\n\nAyrıntı: ${raw}\n\nEn son sürüm: ${RELEASES_URL}`,
+          platformYok
+            ? `Bu işletim sistemi için otomatik güncelleme yayınlanmıyor (şu an yalnızca Windows).\n\nYüklü sürüm: ${appVersion}\nEn son sürümü elle indirebilirsiniz:\n${RELEASES_URL}`
+            : manifestYok
+              ? `Otomatik güncelleme şu an yayında değil (güncelleme dosyası bulunamadı).\n\nYüklü sürüm: ${appVersion}\nEn son sürümü elle indirebilirsiniz:\n${RELEASES_URL}`
+              : `Güncelleme denetlenemedi.\n\nAyrıntı: ${raw}\n\nEn son sürüm: ${RELEASES_URL}`,
           'warn',
         );
       }
