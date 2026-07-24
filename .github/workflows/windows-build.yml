@@ -43,12 +43,30 @@ jobs:
         shell: pwsh
         run: cargo install tauri-cli --version "^2.11" --locked
 
+      # Tauri, NSIS ikililerini upstream'den indiriyor; ara sıra 504 dönüyor.
+      # Önbellek + yeniden deneme ile derleme bu geçici hatalara dayanıklı olur.
+      - name: Cache Tauri NSIS binaries
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-nsis-3.11
+
       - name: Build Windows installer (per-user NSIS)
         working-directory: src-tauri
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: cargo tauri build --bundles nsis
+        run: |
+          $ErrorActionPreference = 'Continue'
+          for ($i = 1; $i -le 3; $i++) {
+            Write-Host "== Bundle denemesi $i/3 =="
+            cargo tauri build --bundles nsis
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Başarısız (exit $LASTEXITCODE). 30 sn sonra tekrar denenecek..."
+            Start-Sleep -Seconds 30
+          }
+          Write-Host "3 denemede de başarısız."
+          exit 1
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
