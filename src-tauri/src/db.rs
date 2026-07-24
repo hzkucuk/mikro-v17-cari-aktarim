@@ -7,6 +7,7 @@
 //! Kendi UPDATE'lerimizi YAZMIYORUZ — Mikro'nun kendi SP'sini çağırıyoruz ki
 //! sürüm farklarında tablo listesi otomatik doğru kalsın.
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tiberius::{AuthMethod, Client, Config, SqlBrowser};
 use tokio::net::TcpStream;
@@ -595,6 +596,168 @@ pub async fn set_trigger(
     exec_simple(client, &sql)
         .await
         .map_err(|e| format!("{verb} TRIGGER başarısız: {e}"))
+}
+
+/// Aktarım oturumunda özel "sipariş kontrol" trigger'ını atlamak için
+/// SESSION_CONTEXT bayrağını set eder (on=true → 1) veya temizler (on=false →
+/// NULL). Yalnız BU bağlantıyı etkiler; başka kullanıcıların oturumları
+/// etkilenmez. Trigger'da `IF SESSION_CONTEXT(N'<key>')=1 RETURN;` muhafızı
+/// bulunmalıdır. Anahtar parametreli gönderilir (injection yok).
+pub async fn set_skip_control(client: &mut SqlClient, key: &str, on: bool) -> Result<(), String> {
+    let val: Option<i32> = if on { Some(1) } else { None };
+    client
+        .execute(
+            "EXEC sys.sp_set_session_context @key = @P1, @value = @P2",
+            &[&key, &val],
+        )
+        .await
+        .map_err(|e| format!("Oturum bağlamı (session context) ayarlanamadı: {e}"))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Trigger muhafızı (SESSION_CONTEXT) otomasyonu — yalnız listedeki trigger'lar
+// ---------------------------------------------------------------------------
+
+const GUARD_MARKER: &str = "<<aktarim-muhafiz>>";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardOutcome {
+    pub trigger: String,
+    /// "eklenecek" | "kaldırılacak" | "zaten var" | "muhafız yok" |
+    /// "INSTEAD OF (atlandı)" | "okunamadı (şifreli?)" | "AS bulunamadı"
+    pub status: String,
+    pub sql: Option<String>,
+}
+
+/// SESSION_CONTEXT anahtarını doğrular (yalnız harf/rakam/_).
+fn validate_ctx_key(key: &str) -> Result<String, String> {
+    let k = key.trim();
+    if k.is_empty() {
+        return Err("Session-context anahtarı boş.".into());
+    }
+    if !k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(format!("Geçersiz anahtar '{k}': yalnız harf/rakam/_ kullanın."));
+    }
+    Ok(k.to_string())
+}
+
+/// Verilen trigger tanımına muhafız enjekte eder (install=true) ya da söker
+/// (install=false). Sonuç: (status, uygulanacak ALTER SQL'i ya da None).
+fn build_guarded_def(def: &str, key: &str, install: bool) -> (String, Option<String>) {
+    let low = def.to_lowercase();
+
+    if install {
+        if def.contains(GUARD_MARKER) || low.contains(&format!("session_context(n'{}')", key.to_lowercase())) {
+            return ("zaten var".into(), None);
+        }
+        if low.contains("instead of") {
+            return ("INSTEAD OF (atlandı)".into(), None);
+        }
+        // Gövde AS'ini bul: FOR|AFTER ... AS (WITH EXECUTE AS'i karıştırmaz).
+        let re_as = Regex::new(r"(?is)\b(?:for|after)\b.*?\bas\b").unwrap();
+        let Some(m) = re_as.find(def) else {
+            return ("AS bulunamadı".into(), None);
+        };
+        let guard = format!(
+            "\n    IF SESSION_CONTEXT(N'{key}') = 1 RETURN;  -- {GUARD_MARKER}",
+        );
+        let mut out = String::with_capacity(def.len() + guard.len());
+        out.push_str(&def[..m.end()]);
+        out.push_str(&guard);
+        out.push_str(&def[m.end()..]);
+        let altered = Regex::new(r"(?i)create\s+trigger")
+            .unwrap()
+            .replacen(&out, 1, "ALTER TRIGGER")
+            .into_owned();
+        ("eklenecek".into(), Some(altered))
+    } else {
+        if !def.contains(GUARD_MARKER) {
+            return ("muhafız yok".into(), None);
+        }
+        // Marker içeren satırı (ve onu izleyen satır sonunu) çıkar.
+        let cleaned: String = def
+            .lines()
+            .filter(|l| !l.contains(GUARD_MARKER))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let altered = Regex::new(r"(?i)create\s+trigger")
+            .unwrap()
+            .replacen(&cleaned, 1, "ALTER TRIGGER")
+            .into_owned();
+        ("kaldırılacak".into(), Some(altered))
+    }
+}
+
+/// Listedeki trigger'lara muhafız enjekte eder/söker. execute=false → yalnız
+/// önizleme (SQL üretilir, çalıştırılmaz); execute=true → ALTER'lar çalıştırılır.
+pub async fn prepare_trigger_guards(
+    cfg: &DbConfig,
+    triggers: &[TriggerCfg],
+    key: &str,
+    install: bool,
+    execute: bool,
+) -> Result<Vec<GuardOutcome>, String> {
+    let key = validate_ctx_key(key)?;
+    let mut client = connect(cfg).await?;
+    let mut out = Vec::new();
+
+    for t in triggers {
+        if t.name.trim().is_empty() {
+            continue;
+        }
+        let full = validate_qualified_ident(&t.name)?; // güvenlik
+        let short = t
+            .name
+            .trim()
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .trim_matches(|c| c == '[' || c == ']');
+
+        let def: String = client
+            .query(
+                "SELECT OBJECT_DEFINITION(OBJECT_ID(@P1))",
+                &[&full.as_str()],
+            )
+            .await
+            .map_err(|e| format!("{short} tanımı alınamadı: {e}"))?
+            .into_first_result()
+            .await
+            .map_err(|e| format!("{short} tanımı okunamadı: {e}"))?
+            .into_iter()
+            .next()
+            .and_then(|r| r.get::<&str, _>(0).map(str::to_owned))
+            .unwrap_or_default();
+
+        if def.trim().is_empty() {
+            out.push(GuardOutcome {
+                trigger: t.name.clone(),
+                status: "okunamadı (şifreli?)".into(),
+                sql: None,
+            });
+            continue;
+        }
+
+        let (status, sql) = build_guarded_def(&def, &key, install);
+
+        if execute {
+            if let Some(ref alter_sql) = sql {
+                exec_simple(&mut client, alter_sql)
+                    .await
+                    .map_err(|e| format!("{short} ALTER başarısız: {e}"))?;
+            }
+        }
+
+        out.push(GuardOutcome {
+            trigger: t.name.clone(),
+            status,
+            sql: if execute { None } else { sql },
+        });
+    }
+
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------

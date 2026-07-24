@@ -336,11 +336,12 @@ dependencies = [
 
 [[package]]
 name = "cari-aktarim"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "aes-gcm",
  "futures-util",
  "getrandom 0.2.17",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

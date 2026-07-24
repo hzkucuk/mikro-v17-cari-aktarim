@@ -1,6 +1,6 @@
 [package]
 name = "cari-aktarim"
-version = "0.1.12"
+version = "0.1.13"
 description = "Mikro V17 Cari Kartı Aktarma — Trigger Yönetimli"
 authors = ["hzkucuk"]
 edition = "2021"
@@ -36,6 +36,9 @@ tiberius = { version = "0.12", default-features = false, features = ["tds73", "c
 # Parola AES-256-GCM ile, cihazda tutulan rastgele bir anahtarla şifrelenir.
 aes-gcm = "0.10"
 getrandom = "0.2"
+
+# Trigger tanımına SESSION_CONTEXT muhafızı enjekte/söker (gövde AS'ini bulmak için)
+regex = "1"
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }

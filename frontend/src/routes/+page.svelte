@@ -20,9 +20,14 @@
   let csvInput: HTMLInputElement;
   let cariTipi = $state(0), userId = $state(1), sonDegGuncelle = $state(false);
   let previewSql = $state<string | null>(null), previewBusy = $state(false);
-  let appVersion = $state('v0.1.12');
+  let appVersion = $state('v0.1.13');
   let rememberPassword = $state(false), settingsMsg = $state('');
   let skipBackup = $state(false); // yedeği opsiyonel yap (test DB'si vb.)
+  // Trigger yöntemi: session-context (mesai içi) | global disable (mesai dışı)
+  let triggerMode = $state<'session' | 'disable'>('session');
+  let skipControlKey = $state('skip_siparis_kontrol');
+  let guardBusy = $state(false);
+  let guardModal = $state<{ install: boolean; outcomes: { trigger: string; status: string; sql: string | null }[] } | null>(null);
   // F10 cari arama (picker) durumu
   const CARI_VIEW = 'dbo.CARI_HESAPLAR_CHOOSE_2A_1';
   let pickerRow = $state<Row | null>(null), pickerField = $state<'eski' | 'yeni'>('eski');
@@ -61,6 +66,33 @@
       log(settingsMsg);
       setTimeout(() => settingsMsg = '', 4000);
     } catch (e) { settingsMsg = `Kaydedilemedi: ${e}`; log(settingsMsg); }
+  }
+
+  // ---- Trigger muhafızı (session-context) — yalnız listedeki trigger'lar ----
+  type GuardOutcome = { trigger: string; status: string; sql: string | null };
+  async function previewGuard(install: boolean) {
+    const trg = cleanTriggers();
+    if (!trg.length) { alert('Önce "Yönetilecek trigger’lar" listesine en az bir trigger ekleyin.'); return; }
+    if (!connectionOk) { alert('Önce "Bağlantıyı Test Et".'); return; }
+    if (!skipControlKey.trim()) { alert('Session-context anahtarı boş olamaz.'); return; }
+    guardBusy = true;
+    try {
+      const outcomes = await invoke<GuardOutcome[]>('preview_trigger_guard', { cfg, triggers: trg, key: skipControlKey, install });
+      guardModal = { install, outcomes };
+    } catch (e) { alert(`Önizleme hatası: ${e}`); log(`Muhafız önizleme hatası: ${e}`); }
+    finally { guardBusy = false; }
+  }
+  async function applyGuard() {
+    if (!guardModal) return;
+    const install = guardModal.install;
+    guardBusy = true;
+    try {
+      const outcomes = await invoke<GuardOutcome[]>('apply_trigger_guard', { cfg, triggers: cleanTriggers(), key: skipControlKey, install });
+      guardModal = null;
+      log(`Trigger muhafızı ${install ? 'kuruldu' : 'kaldırıldı'}: ${outcomes.map((o) => `${o.trigger}=${o.status}`).join(', ')}`);
+      alert(`${install ? 'Muhafız kurulumu' : 'Muhafız kaldırma'} bitti:\n` + outcomes.map((o) => `• ${o.trigger}: ${o.status}`).join('\n'));
+    } catch (e) { alert(`Uygulama hatası: ${e}`); log(`Muhafız hatası: ${e}`); }
+    finally { guardBusy = false; }
   }
 
   // ---- F10 cari arama (picker) ----
@@ -257,7 +289,7 @@
     const v = validateForTransfer(); if (!v) { previewSql = null; return; }
     previewSql = null;
     running = true; progress = { done: 0, total: v.activeRows.length }; rows = rows.map((r) => ({ ...r, status: '', message: '' }));
-    try { const s = await invoke<{ total: number; ok: number; failed: number; triggerMessage: string; triggerRestored: boolean; errors: string[] }>('run_transfer', { cfg, triggers: v.activeTriggers, rows: v.activeRows, cariTipi, userId, sonDegGuncelle }); const message = `Aktarım bitti: ${s.ok} başarılı, ${s.failed} hatalı.\n${s.triggerMessage}${s.errors.length ? `\n\nHatalar:\n${s.errors.join('\n')}` : ''}`; log(message); alert(message); }
+    try { const s = await invoke<{ total: number; ok: number; failed: number; triggerMessage: string; triggerRestored: boolean; errors: string[] }>('run_transfer', { cfg, triggers: triggerMode === 'disable' ? v.activeTriggers : [], rows: v.activeRows, cariTipi, userId, sonDegGuncelle, skipControlKey: triggerMode === 'session' ? skipControlKey : '' }); const message = `Aktarım bitti: ${s.ok} başarılı, ${s.failed} hatalı.\n${s.triggerMessage}${s.errors.length ? `\n\nHatalar:\n${s.errors.join('\n')}` : ''}`; log(message); alert(message); }
     catch (e) { log(`Aktarım hatası: ${e}`); } finally { running = false; }
   }
   async function copyPreview() { try { await navigator.clipboard.writeText(previewSql ?? ''); log('SQL panoya kopyalandı.'); } catch { log('Panoya kopyalanamadı.'); } }
@@ -326,7 +358,7 @@
     <label>Kimlik doğrulama <select bind:value={cfg.auth} onchange={reset}><option value="windows">Windows Integrated</option><option value="sql">SQL Server Auth</option></select></label>
     {#if cfg.auth === 'sql'}<label>Kullanıcı <input bind:value={cfg.username} /></label><label>Şifre <input type="password" bind:value={cfg.password} /></label>{/if}
     <label class="backup-field">Yedek klasörü <span class="picker"><input bind:value={backupDirectory} oninput={reset} /><button onclick={chooseFolder}>Seç…</button></span></label>
-  </div><div class="triggers"><b>Yönetilecek trigger’lar</b>{#each triggers as trigger}<div><input placeholder="dbo.trigger" bind:value={trigger.name} /><input placeholder="dbo.TABLO" bind:value={trigger.table} /><button onclick={() => triggers = triggers.filter((x) => x !== trigger)}>×</button></div>{/each}<button onclick={() => triggers = [...triggers, { name: '', table: '' }]}>+ Trigger ekle</button></div><details><summary>Gelişmiş ayarlar</summary><div class="advanced"><label class="cari-tipi">Cari tipi <select bind:value={cariTipi}><option value={0}>0 — Cari Hesap (müşteri/tedarikçi)</option><option value={1}>1 — Satıcı / Temsilci</option><option value={2}>2 — Banka Hesabı</option><option value={3}>3 — Hizmet</option><option value={4}>4 — Kasa</option><option value={5}>5 — Masraf Merkezi / Gider</option><option value={7}>7 — Personel (bordro)</option><option value={8}>8 — Demirbaş</option><option value={9}>9 — EXIM (ithalat/ihracat)</option></select></label><label>Aktif User ID <input type="number" min="0" bind:value={userId} /></label><label><input type="checkbox" bind:checked={sonDegGuncelle} /> Son değişiklik bilgilerini güncelle</label></div></details>
+  </div><div class="triggers"><b>Yönetilecek trigger’lar</b>{#each triggers as trigger}<div><input placeholder="dbo.trigger" bind:value={trigger.name} /><input placeholder="dbo.TABLO" bind:value={trigger.table} /><button onclick={() => triggers = triggers.filter((x) => x !== trigger)}>×</button></div>{/each}<button onclick={() => triggers = [...triggers, { name: '', table: '' }]}>+ Trigger ekle</button></div><div class="trigmode"><b>Trigger yöntemi</b><div class="radios"><label class="inline"><input type="radio" bind:group={triggerMode} value="session" /> Session-context (mesai içi, önerilen)</label><label class="inline"><input type="radio" bind:group={triggerMode} value="disable" /> Global DISABLE (mesai dışı)</label></div>{#if triggerMode === 'session'}<div class="trigmode-row"><input placeholder="skip_siparis_kontrol" bind:value={skipControlKey} title="Trigger muhafızında kullanılacak SESSION_CONTEXT anahtarı" /><button onclick={() => previewGuard(true)} disabled={guardBusy}>🛡 Trigger’ları Hazırla</button><button onclick={() => previewGuard(false)} disabled={guardBusy}>Muhafızı Kaldır</button></div><small class="hint">Listedeki trigger’lara <b>bir kez</b> muhafız kurulur; sonra aktarımlar mesai içinde, diğer kullanıcıları etkilemeden çalışır.</small>{:else}<small class="hint">Aktarım sırasında listedeki trigger’lar geçici <b>DEVRE DIŞI</b> kalır — bu <b>tüm kullanıcıları</b> etkiler (mesai dışı önerilir).</small>{/if}</div><details><summary>Gelişmiş ayarlar</summary><div class="advanced"><label class="cari-tipi">Cari tipi <select bind:value={cariTipi}><option value={0}>0 — Cari Hesap (müşteri/tedarikçi)</option><option value={1}>1 — Satıcı / Temsilci</option><option value={2}>2 — Banka Hesabı</option><option value={3}>3 — Hizmet</option><option value={4}>4 — Kasa</option><option value={5}>5 — Masraf Merkezi / Gider</option><option value={7}>7 — Personel (bordro)</option><option value={8}>8 — Demirbaş</option><option value={9}>9 — EXIM (ithalat/ihracat)</option></select></label><label>Aktif User ID <input type="number" min="0" bind:value={userId} /></label><label><input type="checkbox" bind:checked={sonDegGuncelle} /> Son değişiklik bilgilerini güncelle</label></div></details>
   <footer><button class="primary" onclick={testConnection} disabled={running}>Bağlantıyı Test Et</button><button class="danger" onclick={backup} disabled={!connectionOk || running}>Önce Yedek Al</button><button class="secondary" onclick={() => update(true)} disabled={running || updateBusy}>{updateBusy ? 'Güncelleme Denetleniyor…' : 'Güncelleme Denetle'}</button><button onclick={triggerStatus} disabled={running}>Trigger Durumu</button><button class="outline" onclick={enableTriggers} disabled={running}>Trigger’ı Geri Aç</button><label class="remember"><input type="checkbox" bind:checked={rememberPassword} /> Şifreyi hatırla</label><button onclick={saveSettings} title="Tüm ayarları kaydeder. 'Şifreyi hatırla' işaretliyse SQL parolası AES-256 ile şifreli saklanır.">💾 Ayarları Kaydet</button><span>{settingsMsg || info}</span></footer></section>
   <div class="splitter" role="separator" aria-label="Bağlantı ve aktarım alanlarının yüksekliğini ayarla" onpointerdown={(event) => resizePanel(0, event)}></div>
   <section class="transfer"><h2>Aktarılacak cari kartları</h2><p class="hint">CSV sütunları: <code>Eski Cari Kodu; Yeni Cari Kodu; Eski Kart Silinsin</code>. İlk iki sütun zorunludur. Kod hücrelerinin sağındaki <b>…</b> ile cari arayabilirsiniz (Mikro F10). Örnek dosya: <code>ornek-cari-aktarim.csv</code>.</p><input class="hidden" bind:this={csvInput} type="file" accept=".csv,text/csv" onchange={importCsv} /><div class="section-tools"><button onclick={() => csvInput.click()} title={"CSV / metin dosyası (UTF-8). Sütunlar ; , veya TAB ile ayrılır:\n  1) Eski Cari Kodu  (zorunlu)\n  2) Yeni Cari Kodu  (zorunlu)\n  3) Eski Kart Silinsin  (opsiyonel): 1 veya boş = sil, 0/hayır/false = koru\nBaşlık satırı otomatik atlanır.\nÖrnek satır:  120.1.INT.HB.1156 ; ESK-120.1.INT.HB.1156 ; 1"}>CSV İçeri Aktar</button><button onclick={() => rows = [...rows, { eski: '', yeni: '', sil: true }]}>+ Satır</button><button onclick={() => rows = [{ eski: '', yeni: '', sil: true }]}>Temizle</button><button onclick={() => validateRows(false)} disabled={validating || !connectionOk} title="Satırları DB'de ön kontrol et: eski kod var mı, yeni kod zaten mevcut mu">{validating ? 'Kontrol…' : '✓ Doğrula'}</button></div><div class="table"><table><thead><tr><th>#</th><th>Eski cari kodu</th><th>Yeni cari kodu</th><th>Eski kart silinsin</th><th>Durum</th><th></th></tr></thead><tbody>{#each rows as row, index}<tr><td>{index + 1}</td><td><div class="cell-pick"><input bind:value={row.eski} onblur={() => validateRow(row)} onkeydown={(e) => { if (e.key === 'F10') { e.preventDefault(); openPicker(row, 'eski'); } else if (e.key === 'Enter') { e.preventDefault(); validateRow(row); } }} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'eski')}>…</button></div></td><td><div class="cell-pick"><input bind:value={row.yeni} onblur={() => validateRow(row)} onkeydown={(e) => { if (e.key === 'F10') { e.preventDefault(); openPicker(row, 'yeni'); } else if (e.key === 'Enter') { e.preventDefault(); validateRow(row); } }} /><button class="pick-btn" title="Cari ara (F10)" onclick={() => openPicker(row, 'yeni')}>…</button></div></td><td><input type="checkbox" bind:checked={row.sil} /></td><td title={row.message}><span class="rowstat {row.status ?? ''}">{row.status === 'ok' ? '✓ Başarılı' : row.status === 'error' ? '✗ Hata' : row.status === 'running' ? '⏳ İşleniyor…' : row.status === 'valid' ? '✓ Hazır' : row.status === 'invalid' ? `⚠ ${row.message ?? 'Sorun'}` : (row.message || '—')}</span></td><td><button aria-label="Satırı sil" onclick={() => rows = rows.length === 1 ? [{ eski: '', yeni: '', sil: true }] : rows.filter((x) => x !== row)}>×</button></td></tr>{/each}</tbody></table></div>{#if running}<div class="progress"><span style={`width:${progress.total ? (progress.done / progress.total) * 100 : 0}%`}></span></div><p class="progress-text">{progress.done}/{progress.total} satır işlendi</p>{/if}<footer><button class="success" onclick={openPreview} disabled={!connectionOk || (!backupOk && !skipBackup) || running || previewBusy}>{previewBusy ? 'SQL Hazırlanıyor…' : 'Aktarımı Başlat'}</button><button class="danger" onclick={cancel} disabled={!running}>İptal</button><label class="skip-backup" title="Yedek almadan aktarıma izin verir. Yalnızca test veritabanında kullanın!"><input type="checkbox" bind:checked={skipBackup} /> Yedeksiz devam et (test)</label>{#if skipBackup && !backupOk}<span class="skip-warn">⚠ Yedek atlanacak</span>{/if}</footer></section>
@@ -347,6 +379,29 @@
         <span class="spacer"></span>
         <button class="secondary" onclick={() => previewSql = null}>Vazgeç</button>
         <button class="success" onclick={confirmTransfer}>Onayla ve Aktar</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if guardModal !== null}
+  <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trigger muhafızı">
+    <div class="modal picker-modal">
+      <div class="modal-head">{guardModal.install ? 'Trigger Muhafızı KUR' : 'Trigger Muhafızı KALDIR'} — önizleme / onay</div>
+      <div class="modal-note">⚠ Aşağıdaki <b>ALTER TRIGGER</b> işlemleri çalıştırılacak. Yalnız listedeki trigger’lar etkilenir; INSTEAD OF / şifreli olanlar atlanır. Önce yedek önerilir.</div>
+      <div class="picker-grid">
+        {#each guardModal.outcomes as o}
+          <div class="guard-item">
+            <div><b>{o.trigger}</b> — <span class="rowstat {o.status.includes('atlandı') || o.status.includes('okunamadı') || o.status.includes('bulunamadı') ? 'invalid' : (o.sql ? 'valid' : '')}">{o.status}</span></div>
+            {#if o.sql}<pre class="modal-sql guard-sql">{o.sql}</pre>{/if}
+          </div>
+        {/each}
+      </div>
+      <div class="modal-actions">
+        <span class="picker-count">{guardModal.outcomes.filter((o) => o.sql).length} trigger değişecek</span>
+        <span class="spacer"></span>
+        <button class="secondary" onclick={() => guardModal = null}>Vazgeç</button>
+        <button class="success" onclick={applyGuard} disabled={guardBusy || !guardModal.outcomes.some((o) => o.sql)}>{guardBusy ? 'Uygulanıyor…' : (guardModal.install ? 'Kur' : 'Kaldır')}</button>
       </div>
     </div>
   </div>
@@ -603,6 +658,14 @@
     border-top:1px solid #e5e7eb; background:#fbfcfd;
   }
   .modal-actions .spacer { flex:1 }
+
+  /* Trigger yöntemi + muhafız */
+  .trigmode { margin-top:14px; display:grid; gap:6px }
+  .trigmode > b { font-size:12px; color:#475569 }
+  .trigmode-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap }
+  .trigmode-row input { flex:1 1 200px }
+  .guard-item { padding:10px 14px; border-bottom:1px solid #eef1f4 }
+  .guard-sql { margin-top:6px; max-height:220px }
   .modal-note.danger { background:#fef2f2; color:#b91c1c; border-bottom-color:#fbcfc9; font-weight:600 }
 
   /* Yedeksiz devam seçeneği */

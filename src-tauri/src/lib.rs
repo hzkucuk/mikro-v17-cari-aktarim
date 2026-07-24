@@ -97,6 +97,7 @@ async fn run_transfer(
     cari_tipi: i32,
     user_id: i32,
     son_deg_guncelle: bool,
+    skip_control_key: String,
     window: Window,
     state: tauri::State<'_, AppState>,
 ) -> Result<TransferSummary, String> {
@@ -200,6 +201,22 @@ async fn run_transfer(
         );
     }
 
+    // --- Sipariş kontrolünü BU OTURUMDA atla (session-context) -------------
+    // Muhafızlı trigger'lar yalnız bu bağlantıda atlanır; diğer kullanıcıların
+    // validasyonu etkilenmez. Global DISABLE'a gerek kalmadan mesai içinde çalışır.
+    let skip_key = skip_control_key.trim().to_string();
+    let mut skip_control_set = false;
+    if !skip_key.is_empty() {
+        db::set_skip_control(&mut client, &skip_key, true).await?;
+        skip_control_set = true;
+        let _ = window.emit(
+            "log",
+            format!(
+                "Sipariş kontrolü bu oturumda atlanıyor (session-context: {skip_key}). Diğer kullanıcılar etkilenmez."
+            ),
+        );
+    }
+
     // --- Satırları işle ----------------------------------------------------
     // Bu blok ne olursa olsun tamamlanır; ardından trigger MUTLAKA geri açılır.
     let mut ok = 0usize;
@@ -287,6 +304,24 @@ async fn run_transfer(
             "progress",
             serde_json::json!({ "done": index + 1, "total": total }),
         );
+    }
+
+    // --- Session-context bayrağını sıfırla (validasyon geri) ---------------
+    if skip_control_set {
+        match db::set_skip_control(&mut client, &skip_key, false).await {
+            Ok(()) => {
+                let _ = window.emit(
+                    "log",
+                    "Sipariş kontrolü geri açıldı (session-context temizlendi).".to_string(),
+                );
+            }
+            Err(e) => {
+                let _ = window.emit(
+                    "log",
+                    format!("Uyarı: session-context temizlenemedi: {e} (bağlantı kapanınca otomatik silinir)"),
+                );
+            }
+        }
     }
 
     // --- Trigger'ı MUTLAKA geri aç -----------------------------------------
@@ -407,6 +442,29 @@ async fn search_cari(
     db::search_cari(&cfg, &view, &term, if limit <= 0 { 100000 } else { limit }).await
 }
 
+/// Listedeki trigger'lara SESSION_CONTEXT muhafızı için üretilecek ALTER'ları
+/// önizler (çalıştırmaz). install=true → ekleme, false → kaldırma.
+#[tauri::command]
+async fn preview_trigger_guard(
+    cfg: DbConfig,
+    triggers: Vec<TriggerCfg>,
+    key: String,
+    install: bool,
+) -> Result<Vec<db::GuardOutcome>, String> {
+    db::prepare_trigger_guards(&cfg, &triggers, &key, install, false).await
+}
+
+/// Listedeki trigger'lara muhafızı gerçekten uygular (ALTER çalıştırır).
+#[tauri::command]
+async fn apply_trigger_guard(
+    cfg: DbConfig,
+    triggers: Vec<TriggerCfg>,
+    key: String,
+    install: bool,
+) -> Result<Vec<db::GuardOutcome>, String> {
+    db::prepare_trigger_guards(&cfg, &triggers, &key, install, true).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -435,6 +493,8 @@ pub fn run() {
             enable_trigger,
             search_cari,
             validate_rows,
+            preview_trigger_guard,
+            apply_trigger_guard,
             settings::save_settings,
             settings::load_settings,
         ])
