@@ -104,6 +104,20 @@
     const { col, dir } = pickerSort;
     return [...pickerRows].sort((a, b) => (a[col] ?? '').localeCompare(b[col] ?? '', 'tr', { numeric: true }) * dir);
   });
+  // Değerleri yalnız 0/1 olan sütunlar (✓/✗ olarak gösterilir).
+  const pickerBoolCols = $derived.by(() => pickerCols.map((_, c) => {
+    let seen = false;
+    for (const r of pickerRows) { const v = (r[c] ?? '').trim(); if (v === '') continue; if (v !== '0' && v !== '1') return false; seen = true; }
+    return seen;
+  }));
+  // Hizalama: bool → orta, kod → sol, tümü sayısal (parasal/miktar) → sağ, diğer → sol.
+  const pickerAlign = $derived.by(() => pickerCols.map((_, c) => {
+    if (pickerBoolCols[c]) return 'center';
+    if (c === pickerCodeIdx) return 'left';
+    let numeric = false;
+    for (const r of pickerRows) { const v = (r[c] ?? '').trim(); if (v === '') continue; if (!/^-?\d+(?:[.,]\d+)?$/.test(v)) return 'left'; numeric = true; }
+    return numeric ? 'right' : 'left';
+  }));
   function selectCari(cells: string[]) {
     if (pickerRow) pickerRow[pickerField] = cells[pickerCodeIdx] ?? cells[0] ?? '';
     closePicker();
@@ -252,6 +266,7 @@
 </script>
 
 <svelte:head><title>Mikro Cari Kartı Aktarma</title></svelte:head>
+<svelte:window onkeydown={(e) => { if (pickerRow) pickerKeydown(e); }} />
 <main>
   <header><div><h1>Cari Kartı Aktarma <small>098492</small></h1><p>Mikro V17 · Trigger Yönetimli · <span class="version">{appVersion}</span></p></div></header>
   <div class="warning">⚠ ÖNCE YEDEK ALIN — Aktarım geri alınamaz. Aktarım sırasında Mikro’yu kapatın.</div>
@@ -292,7 +307,7 @@
       <div class="modal-head">Cari Ara — {pickerField === 'eski' ? 'Eski' : 'Yeni'} kod · {CARI_VIEW}</div>
       <div class="picker-search">
         <!-- svelte-ignore a11y_autofocus -->
-        <input autofocus placeholder="Kod ara:  120*  ·  *30*  ·  boş = tümü  ·  ↑↓ gez · Enter seç" bind:value={pickerTerm} oninput={pickerInput} onkeydown={pickerKeydown} />
+        <input autofocus placeholder="Kod ara:  120*  ·  *30*  ·  boş = tümü  ·  ↑↓ gez · Enter seç" bind:value={pickerTerm} oninput={pickerInput} />
         <button class="primary" onclick={searchCari} disabled={pickerBusy}>{pickerBusy ? 'Aranıyor…' : 'Ara'}</button>
       </div>
       <div class="picker-grid">
@@ -301,8 +316,8 @@
         {:else if !pickerCols.length}<p class="picker-empty">Kayıt bulunamadı. Farklı bir arama deneyin (örn. <code>*{pickerTerm || '30'}*</code>) veya boş bırakıp <b>Ara</b>.</p>
         {:else}
           <table>
-            <thead><tr>{#each pickerCols as c, i}<th class={i === pickerCodeIdx ? 'code-col' : ''} onclick={() => pickerSortBy(i)}>{c}{pickerSort?.col === i ? (pickerSort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>{/each}</tr></thead>
-            <tbody>{#each pickerView as cells, i}<tr class={i === pickerActive ? 'active' : ''} onclick={() => pickerActive = i} ondblclick={() => selectCari(cells)}>{#each cells as v, j}<td class={j === pickerCodeIdx ? 'code-col' : ''}>{v}</td>{/each}</tr>{/each}</tbody>
+            <thead><tr>{#each pickerCols as c, i}<th class={i === pickerCodeIdx ? 'code-col' : ''} style="text-align:{pickerAlign[i]}" onclick={() => pickerSortBy(i)}>{c}{pickerSort?.col === i ? (pickerSort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>{/each}</tr></thead>
+            <tbody>{#each pickerView as cells, i}<tr class={i === pickerActive ? 'active' : ''} onclick={() => pickerActive = i} ondblclick={() => selectCari(cells)}>{#each cells as v, j}<td class={j === pickerCodeIdx ? 'code-col' : ''} style="text-align:{pickerAlign[j]}">{#if pickerBoolCols[j] && (v === '0' || v === '1')}<span class={v === '1' ? 'byes' : 'bno'}>{v === '1' ? '✓' : '✗'}</span>{:else}{v}{/if}</td>{/each}</tr>{/each}</tbody>
           </table>
         {/if}
       </div>
@@ -576,6 +591,8 @@
   .picker-grid tbody tr:hover td { background:#eff5ff }
   .picker-grid tbody tr.active td { background:#dbeafe }
   .picker-grid tbody tr.active td.code-col { background:#bfdbfe }
+  .picker-grid .byes { color:#16a34a; font-weight:700 }
+  .picker-grid .bno { color:#dc2626; font-weight:700 }
   .picker-empty { padding:24px; color:#6b7280; text-align:center; line-height:1.6 }
   .picker-empty.error { color:#b91c1c; font-weight:500 }
   .picker-grid th.code-col, .picker-grid td.code-col { background:#eff5ff }
