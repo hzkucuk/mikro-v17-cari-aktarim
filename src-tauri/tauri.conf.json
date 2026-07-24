@@ -14,11 +14,10 @@
     "windows": [
       {
         "title": "Mikro Cari Kartı Aktarma — Trigger Yönetimli",
-        "width": 1320,
-        "height": 900,
-        "minWidth": 1000,
-        "minHeight": 700,
-        "maximized": true,
+        "width": 1120,
+        "height": 760,
+        "minWidth": 820,
+        "minHeight": 600,
         "resizable": true,
         "center": true
       }
