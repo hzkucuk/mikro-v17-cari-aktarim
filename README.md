@@ -17,6 +17,40 @@ ve iş bittiğinde tekrar açar.
 Arayüz SvelteKit ile `frontend/` altında tutulur. Tauri derlemesi öncesinde
 `npm --prefix frontend run build` otomatik çalışır.
 
+## Kurulum
+
+Kurulum dosyaları [GitHub Releases](https://github.com/hzkucuk/mikro-v17-cari-aktarim/releases)
+sayfasındadır. Uygulama **kod imzalı değildir**; işletim sistemleri bu yüzden ilk
+açılışta uyarı gösterir. Aşağıdaki adımlar bunu çözer.
+
+### Windows
+
+1. `Mikro Cari Aktarim_<sürüm>_x64-setup.exe` dosyasını indirip çalıştırın.
+2. SmartScreen "Bilinmeyen yayımcı" uyarısı verirse: **Ek bilgi → Yine de çalıştır**.
+
+Kurulum **yalnızca kuran kullanıcı** içindir (`%LOCALAPPDATA%`); yönetici hakkı
+gerekmez ve diğer kullanıcıların masaüstüne/başlat menüsüne kısayol eklenmez.
+
+### macOS (Apple Silicon)
+
+macOS, tarayıcıyla indirilen imzasız uygulamaları karantinaya alır ve yanıltıcı
+biçimde **"… hasar görmüş olduğu için açılamıyor"** der. Uygulama hasarlı
+değildir; karantina işaretinin kaldırılması yeterlidir:
+
+1. `Mikro Cari Aktarim_<sürüm>_aarch64.dmg` dosyasını açın.
+2. `Mikro Cari Aktarim.app`'i **Applications** klasörüne sürükleyin.
+3. Disk görüntüsünü çıkarın (eject).
+4. Terminal'de şu komutu çalıştırın:
+
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/Mikro Cari Aktarim.app"
+   ```
+
+5. Uygulamayı açın. (İlk açılışta hâlâ uyarı çıkarsa: uygulamaya **sağ tık → Aç**.)
+
+> Not: Otomatik güncelleme yalnızca Windows'ta çalışır. macOS sürümü elle
+> indirilip yukarıdaki adımlarla kurulur.
+
 ## Otomatik güncelleme
 
 Uygulama, GitHub Releases altındaki imzalı NSIS güncelleme paketlerini kontrol
