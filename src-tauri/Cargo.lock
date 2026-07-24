@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "cari-aktarim"
-version = "0.1.12"
+version = "0.1.14"
 dependencies = [
  "aes-gcm",
  "futures-util",

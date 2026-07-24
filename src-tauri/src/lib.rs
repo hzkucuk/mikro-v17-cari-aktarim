@@ -143,8 +143,14 @@ async fn run_transfer(
         format!("SQL denetim kaydı etkin: {client_machine} / {client_user}"),
     );
 
-    // --- Trigger'ı kapat ---------------------------------------------------
+    // Session modu: skip_control_key verilmişse GLOBAL DISABLE yapılmaz;
+    // listedeki trigger'lara muhafız (session-context) kullanılır.
+    let skip_key = skip_control_key.trim().to_string();
+    let session_mode = !skip_key.is_empty();
+
+    // --- Trigger'ı kapat (yalnız GLOBAL DISABLE modunda) -------------------
     let mut disabled_triggers: Vec<(String, String, i64)> = Vec::new();
+    if !session_mode {
     for (trig_ident, table_ident) in &trigger_idents {
         // Önceden devre dışı bırakılmış trigger'ı uygulama açmaz; yalnızca
         // kendi kapattığı trigger'lar için koruma kaydı tutar.
@@ -200,13 +206,32 @@ async fn run_transfer(
             format!("Trigger devre dışı bırakıldı: {trig_ident} ON {table_ident}"),
         );
     }
+    } // if !session_mode
 
-    // --- Sipariş kontrolünü BU OTURUMDA atla (session-context) -------------
-    // Muhafızlı trigger'lar yalnız bu bağlantıda atlanır; diğer kullanıcıların
-    // validasyonu etkilenmez. Global DISABLE'a gerek kalmadan mesai içinde çalışır.
-    let skip_key = skip_control_key.trim().to_string();
+    // --- Session modu: muhafızı GARANTİLE + session-context set -------------
+    // Aktarım başlarken listedeki trigger'lara muhafız (yoksa) otomatik eklenir;
+    // ayrı "Hazırla" adımına gerek yoktur. Muhafız yalnız bu oturumu atlatır.
     let mut skip_control_set = false;
-    if !skip_key.is_empty() {
+    if session_mode {
+        if !triggers.is_empty() {
+            let outcomes = db::guards_on_client(&mut client, &triggers, &skip_key, true, true).await?;
+            for o in &outcomes {
+                if o.status == "eklenecek" {
+                    let _ = window.emit(
+                        "log",
+                        format!("Trigger muhafızı otomatik eklendi (ALTER): {}", o.trigger),
+                    );
+                } else if o.status.contains("atlandı")
+                    || o.status.contains("okunamadı")
+                    || o.status.contains("bulunamadı")
+                {
+                    let _ = window.emit(
+                        "log",
+                        format!("Uyarı — {}: {} → muhafızsız kaldı, bu trigger aktarımı bloke edebilir.", o.trigger, o.status),
+                    );
+                }
+            }
+        }
         db::set_skip_control(&mut client, &skip_key, true).await?;
         skip_control_set = true;
         let _ = window.emit(
@@ -442,6 +467,13 @@ async fn search_cari(
     db::search_cari(&cfg, &view, &term, if limit <= 0 { 100000 } else { limit }).await
 }
 
+/// Verilen metni dosyaya yazar (CSV dışa aktarım için). Yol kullanıcı tarafından
+/// kaydet-diyaloğuyla seçilir.
+#[tauri::command]
+async fn save_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| format!("Dosya yazılamadı: {e}"))
+}
+
 /// Listedeki trigger'lara SESSION_CONTEXT muhafızı için üretilecek ALTER'ları
 /// önizler (çalıştırmaz). install=true → ekleme, false → kaldırma.
 #[tauri::command]
@@ -495,6 +527,7 @@ pub fn run() {
             validate_rows,
             preview_trigger_guard,
             apply_trigger_guard,
+            save_text_file,
             settings::save_settings,
             settings::load_settings,
         ])

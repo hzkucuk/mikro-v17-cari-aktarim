@@ -690,8 +690,8 @@ fn build_guarded_def(def: &str, key: &str, install: bool) -> (String, Option<Str
     }
 }
 
-/// Listedeki trigger'lara muhafız enjekte eder/söker. execute=false → yalnız
-/// önizleme (SQL üretilir, çalıştırılmaz); execute=true → ALTER'lar çalıştırılır.
+/// Listedeki trigger'lara muhafız enjekte eder/söker (yeni bağlantı açar).
+/// execute=false → yalnız önizleme; execute=true → ALTER'lar çalıştırılır.
 pub async fn prepare_trigger_guards(
     cfg: &DbConfig,
     triggers: &[TriggerCfg],
@@ -699,8 +699,20 @@ pub async fn prepare_trigger_guards(
     install: bool,
     execute: bool,
 ) -> Result<Vec<GuardOutcome>, String> {
-    let key = validate_ctx_key(key)?;
     let mut client = connect(cfg).await?;
+    guards_on_client(&mut client, triggers, key, install, execute).await
+}
+
+/// prepare_trigger_guards'ın çekirdeği — MEVCUT bağlantıda çalışır (aktarım
+/// sırasında aynı oturumda muhafızı garantilemek için de kullanılır).
+pub async fn guards_on_client(
+    client: &mut SqlClient,
+    triggers: &[TriggerCfg],
+    key: &str,
+    install: bool,
+    execute: bool,
+) -> Result<Vec<GuardOutcome>, String> {
+    let key = validate_ctx_key(key)?;
     let mut out = Vec::new();
 
     for t in triggers {
@@ -744,7 +756,7 @@ pub async fn prepare_trigger_guards(
 
         if execute {
             if let Some(ref alter_sql) = sql {
-                exec_simple(&mut client, alter_sql)
+                exec_simple(client, alter_sql)
                     .await
                     .map_err(|e| format!("{short} ALTER başarısız: {e}"))?;
             }
